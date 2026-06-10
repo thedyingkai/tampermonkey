@@ -7,6 +7,8 @@
 // @match        https://www.luogu.com.cn/*
 // @grant        GM_addStyle
 // @run-at       document-end
+// @downloadURL  https://github.com/thedyingkai/tampermonkey/blob/main/%E6%B4%9B%E8%B0%B7%E9%9A%8F%E6%9C%BA%E9%A2%98/%E6%B4%9B%E8%B0%B7%E9%9A%8F%E6%9C%BA%E9%A2%98.user.js
+// @updateURL    https://raw.githubusercontent.com/thedyingkai/tampermonkey/blob/main/%E6%B4%9B%E8%B0%B7%E9%9A%8F%E6%9C%BA%E9%A2%98/%E6%B4%9B%E8%B0%B7%E9%9A%8F%E6%9C%BA%E9%A2%98.user.js
 // ==/UserScript==
 
 (function () {
