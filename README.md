@@ -36,4 +36,4 @@ https://www.luogu.com.cn/*
 
 ### 脚本预览
 
-![](image\1.png) ![](image\2.png)
+![](https://github.com/thedyingkai/tampermonkey/blob/main/image/1.png) ![](https://github.com/thedyingkai/tampermonkey/blob/main/image/2.png)
