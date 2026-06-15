@@ -1,12 +1,14 @@
 // ==UserScript==
 // @name         洛谷随机题
 // @namespace    https://www.luogu.com.cn
-// @version      1.2
+// @version      1.3
 // @description  解析洛谷题库 HTML，比较相邻页判断最大页，过滤 AC，支持拉黑、拖拽、缩放、字号调整，vibe coding
 // @author       thedyingkai
 // @match        https://www.luogu.com.cn/*
 // @grant        GM_addStyle
 // @run-at       document-end
+// @downloadURL  https://github.com/thedyingkai/tampermonkey/blob/main/%E6%B4%9B%E8%B0%B7%E9%9A%8F%E6%9C%BA%E9%A2%98/%E6%B4%9B%E8%B0%B7%E9%9A%8F%E6%9C%BA%E9%A2%98.user.js
+// @updateURL    https://github.com/thedyingkai/tampermonkey/blob/main/%E6%B4%9B%E8%B0%B7%E9%9A%8F%E6%9C%BA%E9%A2%98/%E6%B4%9B%E8%B0%B7%E9%9A%8F%E6%9C%BA%E9%A2%98.user.js
 // ==/UserScript==
 
 (function () {
@@ -14,11 +16,11 @@
 
     var BASE = 'https://www.luogu.com.cn';
 
-    var STORAGE_DIFF = 'luogu_rand_diff_v1.2';
-    var STORAGE_PAGE_CACHE = 'luogu_rand_page_cache_v1.2';
-    var STORAGE_BLACKLIST = 'luogu_rand_blacklist_v1.2';
-    var STORAGE_ALLOW_AC = 'luogu_rand_allow_ac_v1.2';
-    var STORAGE_UI = 'luogu_rand_ui_v1.2';
+    var STORAGE_DIFF = 'luogu_rand_diff_v1.3';
+    var STORAGE_PAGE_CACHE = 'luogu_rand_page_cache_v1.3';
+    var STORAGE_BLACKLIST = 'luogu_rand_blacklist_v1.3';
+    var STORAGE_ALLOW_AC = 'luogu_rand_allow_ac_v1.3';
+    var STORAGE_UI = 'luogu_rand_ui_v1.3';
 
     var CACHE_TTL = 7 * 24 * 60 * 60 * 1000;
     var MAX_REASONABLE_PAGE = 1000;
@@ -78,7 +80,15 @@
         '.luogu-rand-black-item{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px;border-radius:9px;background:#fff;margin-bottom:6px;box-shadow:0 1px 4px rgba(0,0,0,.05)}',
         '.luogu-rand-black-item a{color:#3498db;font-weight:800;text-decoration:none}',
         '.luogu-rand-black-item button{width:48px;height:26px;border:none;border-radius:8px;background:#e74c3c;color:#fff;font-weight:800;cursor:pointer}',
-        '#luogu-rand-resize-hint{position:absolute;right:7px;bottom:4px;color:#aaa;font-size:12px;pointer-events:none}'
+        '#luogu-rand-resize-hint{position:absolute;right:7px;bottom:4px;color:#aaa;font-size:12px;pointer-events:none}',
+        '#luogu-rand-box.minimized{width:auto!important;min-width:0!important;min-height:0!important;height:auto!important;resize:none!important;overflow:visible!important;padding:8px 10px;border-radius:999px;cursor:move}',
+        '#luogu-rand-box.minimized #luogu-rand-full-panel{display:none}',
+        '#luogu-rand-box.minimized #luogu-rand-mini-panel{display:flex}',
+        '#luogu-rand-mini-panel{display:none;align-items:center;gap:6px}',
+        '#luogu-rand-mini-diff{height:34px;min-width:120px;border:none;border-radius:999px;padding:0 14px;font-weight:800;color:#fff;cursor:pointer;white-space:nowrap}',
+        '#luogu-rand-mini-black,#luogu-rand-mini-expand{width:30px;height:30px;border:none;border-radius:999px;color:#fff;font-weight:800;cursor:pointer}',
+        '#luogu-rand-mini-black{background:#c0392b}',
+        '#luogu-rand-mini-expand{background:#6c757d}'
     ].join('\n'));
 
     function rand(l, r) {
@@ -161,7 +171,8 @@
             bottom: old.bottom || '',
             width: old.width || '',
             height: old.height || '',
-            fontSize: old.fontSize || 14
+            fontSize: old.fontSize || 14,
+            minimized: old.minimized === true
         };
 
         if (box && box.style) {
@@ -169,8 +180,11 @@
             ui.top = box.style.top || ui.top;
             ui.right = box.style.right || ui.right;
             ui.bottom = box.style.bottom || ui.bottom;
-            ui.width = box.style.width || box.getBoundingClientRect().width + 'px';
-            ui.height = box.style.height || box.getBoundingClientRect().height + 'px';
+
+            if (!box.classList.contains('minimized')) {
+                ui.width = box.style.width || box.getBoundingClientRect().width + 'px';
+                ui.height = box.style.height || box.getBoundingClientRect().height + 'px';
+            }
 
             var fs = box.style.getPropertyValue('--luogu-rand-font-size');
             if (fs) ui.fontSize = Number(fs.replace('px', '')) || ui.fontSize;
@@ -195,6 +209,76 @@
         if (ui.fontSize) {
             box.style.setProperty('--luogu-rand-font-size', Number(ui.fontSize) + 'px');
         }
+    }
+
+    function getCurrentDiff() {
+        return localStorage.getItem(STORAGE_DIFF) || '3';
+    }
+
+    function getCurrentDiffName() {
+        var diff = getCurrentDiff();
+        var i;
+
+        for (i = 0; i < difficulties.length; i++) {
+            if (difficulties[i][0] === diff) return difficulties[i][1];
+        }
+
+        return '未知难度';
+    }
+
+    function getCurrentAllowAC() {
+        var node = document.getElementById('luogu-rand-allow-ac');
+
+        if (node) return node.checked;
+
+        return localStorage.getItem(STORAGE_ALLOW_AC) === '1';
+    }
+
+    function updateMiniPanel() {
+        var diff = getCurrentDiff();
+        var btn = document.getElementById('luogu-rand-mini-diff');
+
+        if (!btn) return;
+
+        btn.textContent = getCurrentDiffName();
+        btn.style.background = COLOR[Number(diff)];
+    }
+
+    function setMinimized(mini) {
+        var box = document.getElementById('luogu-rand-box');
+        var ui = getUIState();
+
+        ui.minimized = mini === true;
+        writeJSON(STORAGE_UI, ui);
+
+        if (!box) return;
+
+        box.classList.toggle('minimized', ui.minimized);
+
+        if (ui.minimized) {
+            box.style.height = 'auto';
+            box.style.resize = 'none';
+        } else {
+            box.style.resize = 'both';
+
+            if (ui.width) box.style.width = ui.width;
+            if (ui.height) box.style.height = ui.height;
+        }
+
+        updateMiniPanel();
+    }
+
+    function quickBlacklistCurrent() {
+        var pid = getCurrentProblemId();
+
+        if (!pid) {
+            setStatus('当前不是题目页，无法拉黑当前题目');
+            return;
+        }
+
+        addToBlacklist(pid);
+        updateBlacklistPanel();
+        setStatus('已拉黑题目 ' + pid);
     }
 
     function getPageCache() {
@@ -622,6 +706,13 @@
         var pid = await pickProblem(diff, allowAC);
 
         setStatus('抽中 ' + pid + '，正在打开...');
+
+        var ui = getUIState();
+        ui.minimized = true;
+        writeJSON(STORAGE_UI, ui);
+
+        setMinimized(true);
+
         location.href = buildProblemUrl(pid);
     }
 
@@ -669,6 +760,7 @@
 
         localStorage.setItem(STORAGE_DIFF, diff);
         updateStatusByDiff(diff);
+        updateMiniPanel();
     }
 
     function updateBlacklistPanel() {
@@ -717,20 +809,22 @@
 
         var ui = getUIState();
         ui.fontSize = size;
-        saveUIState(ui);
+        writeJSON(STORAGE_UI, ui);
     }
 
-    function enableDrag(box, header) {
+    function enableDrag(box, handle, allowButtonDrag) {
         var dragging = false;
+        var moved = false;
         var startX = 0;
         var startY = 0;
         var startLeft = 0;
         var startTop = 0;
 
-        header.addEventListener('mousedown', function (e) {
-            if (e.target.closest('button')) return;
+        handle.addEventListener('mousedown', function (e) {
+            if (!allowButtonDrag && e.target.closest('button')) return;
 
             dragging = true;
+            moved = false;
             startX = e.clientX;
             startY = e.clientY;
 
@@ -752,6 +846,10 @@
             var dx = e.clientX - startX;
             var dy = e.clientY - startY;
 
+            if (Math.abs(dx) + Math.abs(dy) > 4) {
+                moved = true;
+            }
+
             var newLeft = Math.max(0, Math.min(window.innerWidth - 80, startLeft + dx));
             var newTop = Math.max(0, Math.min(window.innerHeight - 60, startTop + dy));
 
@@ -765,13 +863,25 @@
             dragging = false;
             document.body.style.userSelect = '';
 
+            if (moved) {
+                box.setAttribute('data-luogu-rand-dragged', '1');
+
+                setTimeout(function () {
+                    box.removeAttribute('data-luogu-rand-dragged');
+                }, 160);
+            }
+
             var ui = getUIState();
             ui.left = box.style.left;
             ui.top = box.style.top;
             ui.right = 'auto';
             ui.bottom = 'auto';
-            ui.width = box.style.width || box.getBoundingClientRect().width + 'px';
-            ui.height = box.style.height || box.getBoundingClientRect().height + 'px';
+
+            if (!box.classList.contains('minimized')) {
+                ui.width = box.style.width || box.getBoundingClientRect().width + 'px';
+                ui.height = box.style.height || box.getBoundingClientRect().height + 'px';
+            }
+
             writeJSON(STORAGE_UI, ui);
         });
     }
@@ -785,6 +895,8 @@
             clearTimeout(timer);
 
             timer = setTimeout(function () {
+                if (box.classList.contains('minimized')) return;
+
                 var ui = getUIState();
                 ui.width = box.style.width || box.getBoundingClientRect().width + 'px';
                 ui.height = box.style.height || box.getBoundingClientRect().height + 'px';
@@ -801,6 +913,30 @@
         var box = document.createElement('div');
         box.id = 'luogu-rand-box';
 
+        var miniPanel = document.createElement('div');
+        miniPanel.id = 'luogu-rand-mini-panel';
+
+        var miniDiffBtn = document.createElement('button');
+        miniDiffBtn.id = 'luogu-rand-mini-diff';
+        miniDiffBtn.title = '点击继续随机当前难度';
+
+        var miniBlackBtn = document.createElement('button');
+        miniBlackBtn.id = 'luogu-rand-mini-black';
+        miniBlackBtn.textContent = '×';
+        miniBlackBtn.title = '拉黑当前题目';
+
+        var miniExpandBtn = document.createElement('button');
+        miniExpandBtn.id = 'luogu-rand-mini-expand';
+        miniExpandBtn.textContent = '↗';
+        miniExpandBtn.title = '展开面板';
+
+        miniPanel.appendChild(miniDiffBtn);
+        miniPanel.appendChild(miniBlackBtn);
+        miniPanel.appendChild(miniExpandBtn);
+
+        var fullPanel = document.createElement('div');
+        fullPanel.id = 'luogu-rand-full-panel';
+
         var header = document.createElement('div');
         header.id = 'luogu-rand-header';
 
@@ -811,6 +947,11 @@
         var fontTools = document.createElement('div');
         fontTools.id = 'luogu-rand-font-tools';
 
+        var foldBtn = document.createElement('button');
+        foldBtn.className = 'luogu-rand-mini-btn';
+        foldBtn.textContent = '—';
+        foldBtn.title = '最小化';
+
         var smallBtn = document.createElement('button');
         smallBtn.className = 'luogu-rand-mini-btn';
         smallBtn.textContent = 'A−';
@@ -819,6 +960,7 @@
         bigBtn.className = 'luogu-rand-mini-btn';
         bigBtn.textContent = 'A+';
 
+        fontTools.appendChild(foldBtn);
         fontTools.appendChild(smallBtn);
         fontTools.appendChild(bigBtn);
         header.appendChild(title);
@@ -907,13 +1049,16 @@
         resizeHint.id = 'luogu-rand-resize-hint';
         resizeHint.textContent = '↘';
 
-        box.appendChild(header);
-        box.appendChild(diffGrid);
-        box.appendChild(optionRow);
-        box.appendChild(actions);
-        box.appendChild(status);
-        box.appendChild(blacklistPanel);
-        box.appendChild(resizeHint);
+        fullPanel.appendChild(header);
+        fullPanel.appendChild(diffGrid);
+        fullPanel.appendChild(optionRow);
+        fullPanel.appendChild(actions);
+        fullPanel.appendChild(status);
+        fullPanel.appendChild(blacklistPanel);
+        fullPanel.appendChild(resizeHint);
+
+        box.appendChild(miniPanel);
+        box.appendChild(fullPanel);
 
         document.body.appendChild(box);
 
@@ -928,7 +1073,7 @@
             refreshBtn.textContent = busy ? '处理中...' : '刷新页数';
         }
 
-        randomBtn.onclick = async function () {
+        async function runRandomFromUI() {
             setBusy(true);
 
             try {
@@ -940,6 +1085,48 @@
             } finally {
                 setBusy(false);
             }
+        }
+
+        randomBtn.onclick = runRandomFromUI;
+
+        miniDiffBtn.onclick = async function (e) {
+            if (box.getAttribute('data-luogu-rand-dragged') === '1') {
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+            }
+            e.stopPropagation();
+
+            try {
+                await randomProblem(getCurrentDiff(), getCurrentAllowAC());
+            } catch (err) {
+                console.error(err);
+                alert(err.message || String(err));
+            }
+        };
+
+        miniBlackBtn.onclick = function (e) {
+            if (box.getAttribute('data-luogu-rand-dragged') === '1') {
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+            }
+            e.stopPropagation();
+            quickBlacklistCurrent();
+        };
+
+        miniExpandBtn.onclick = function (e) {
+            if (box.getAttribute('data-luogu-rand-dragged') === '1') {
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+            }
+            e.stopPropagation();
+            setMinimized(false);
+        };
+
+        foldBtn.onclick = function () {
+            setMinimized(true);
         };
 
         refreshBtn.onclick = async function () {
@@ -994,9 +1181,15 @@
 
         restoreUI(box);
         enableDrag(box, header);
+        enableDrag(box, miniPanel, true);
         observeResize(box);
         setActiveDifficulty(savedDiff);
         updateBlacklistPanel();
+        updateMiniPanel();
+
+        if (getUIState().minimized === true) {
+            setMinimized(true);
+        }
     }
 
     createUI();
