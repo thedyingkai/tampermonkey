@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         洛谷工具箱（随机题 / 难度染色 / 难度统计）
 // @namespace    https://github.com/thedyingkai/tampermonkey
-// @version      3.1.0
+// @version      3.1.1
 // @description  合并洛谷随机题、难度染色、练习难度统计；统一可扩展设置界面；全部 fetch 请求统一限制为最多 2 次/秒
 // @author       thedyingkai
 // @match        https://www.luogu.com.cn/*
@@ -1245,15 +1245,151 @@
             return Array.from(map.values());
         },
 
-        async fetchPageDoc(url) {
-            return await RequestQueue.doc(url, requestOptions({
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        listToArray(value) {
+            if (Array.isArray(value)) return value;
+
+            if (value && typeof value === 'object') {
+                return Object.keys(value)
+                    .sort((a, b) => Number(a) - Number(b))
+                    .map(key => value[key]);
+            }
+
+            return null;
+        },
+
+        getJsonProblemObject(item) {
+            if (!item || typeof item !== 'object') return null;
+            return item.problem || item.problemInfo || item.problemData || item.problemsetProblem || item;
+        },
+
+        getJsonProblemPid(item) {
+            const problem = this.getJsonProblemObject(item);
+            if (!problem || typeof problem !== 'object') return '';
+
+            const candidates = [
+                problem.pid,
+                problem.problemId,
+                problem.problem_id,
+                problem.problem?.pid,
+                item?.pid,
+            ];
+
+            for (const x of candidates) {
+                if (typeof x !== 'string') continue;
+
+                const pid = x.trim();
+                if (/^[A-Za-z0-9_.-]+$/.test(pid)) return pid;
+            }
+
+            return '';
+        },
+
+        getJsonProblemDifficulty(item) {
+            const problem = this.getJsonProblemObject(item);
+            const value = problem?.difficulty ?? item?.difficulty ?? problem?.problem?.difficulty;
+            return validDiff(value) ? Number(value) : null;
+        },
+
+        jsonLooksAccepted(value) {
+            if (!value || typeof value !== 'object') return false;
+            if (value.accepted === true) return true;
+
+            const status = value.status ?? value.result ?? value.judgeStatus ?? value.statusType;
+
+            if (status === 12) return true;
+
+            if (typeof status === 'string') {
+                const text = status.toLowerCase();
+                if (text === 'accepted' || text === 'ac') return true;
+            }
+
+            if (status && typeof status === 'object') {
+                if (status.accepted === true) return true;
+                if (status.id === 12 || status.value === 12) return true;
+            }
+
+            return false;
+        },
+
+        isJsonProblemAccepted(item) {
+            const problem = this.getJsonProblemObject(item);
+            return this.jsonLooksAccepted(item) || this.jsonLooksAccepted(problem) || this.jsonLooksAccepted(item?.problemStatus);
+        },
+
+        findProblemListArray(obj, depth = 0) {
+            if (!obj || typeof obj !== 'object' || depth > 8) return null;
+
+            if (obj.problems && typeof obj.problems === 'object') {
+                const arr = this.listToArray(obj.problems.result);
+                if (arr) return arr;
+            }
+
+            const direct = this.listToArray(obj.result);
+            if (direct && direct.some(item => this.getJsonProblemPid(item))) return direct;
+
+            const preferredKeys = ['data', 'currentData', 'problems', 'problemsetProblems', 'items', 'list'];
+
+            for (const key of preferredKeys) {
+                if (!(key in obj)) continue;
+                const arr = this.findProblemListArray(obj[key], depth + 1);
+                if (arr) return arr;
+            }
+
+            for (const key of Object.keys(obj)) {
+                if (preferredKeys.includes(key)) continue;
+                const arr = this.findProblemListArray(obj[key], depth + 1);
+                if (arr) return arr;
+            }
+
+            return null;
+        },
+
+        parseProblemsFromJSON(data, allowAC) {
+            const list = this.findProblemListArray(data);
+            if (!list) return null;
+
+            const map = new Map();
+            let cacheChanged = false;
+
+            for (const item of list) {
+                const pid = this.getJsonProblemPid(item);
+                if (!pid) continue;
+
+                const diff = this.getJsonProblemDifficulty(item);
+                if (diff !== null && ProblemDifficulty.get(pid) !== diff && ProblemDifficulty.put(pid, diff)) {
+                    cacheChanged = true;
+                }
+
+                const accepted = this.isJsonProblemAccepted(item);
+                if (!allowAC && accepted) continue;
+
+                if (!map.has(pid)) map.set(pid, { pid, accepted });
+            }
+
+            if (cacheChanged) ProblemDifficulty.scheduleSave();
+            return Array.from(map.values());
+        },
+
+        parseProblemsFromText(text, allowAC) {
+            try {
+                const data = JSON.parse(text);
+                const problems = this.parseProblemsFromJSON(data, allowAC);
+                if (problems) return problems;
+            } catch (_) { }
+
+            const doc = new DOMParser().parseFromString(text, 'text/html');
+            return this.parseProblemsFromDOM(doc, allowAC);
+        },
+
+        async fetchPageText(url) {
+            return await RequestQueue.text(url, requestOptions({
+                'accept': 'application/json, text/html, */*',
             }));
         },
 
         async fetchPageProblems(diff, page, allowAC) {
-            const doc = await this.fetchPageDoc(this.buildListUrl(page, diff));
-            return this.parseProblemsFromDOM(doc, allowAC);
+            const text = await this.fetchPageText(this.buildListUrl(page, diff));
+            return this.parseProblemsFromText(text, allowAC);
         },
 
         problemsToPids(problems) {
