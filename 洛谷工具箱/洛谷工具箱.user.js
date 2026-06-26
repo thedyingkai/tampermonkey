@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         洛谷工具箱（随机题 / 难度染色 / 难度统计）
 // @namespace    https://github.com/thedyingkai/tampermonkey
-// @version      3.0.1
+// @version      3.0.2
 // @description  合并洛谷随机题、难度染色、练习难度统计；统一可扩展设置界面；全部 fetch 请求统一限制为最多 2 次/秒
 // @author       thedyingkai
 // @match        https://www.luogu.com.cn/*
@@ -197,15 +197,31 @@
 
     let settings = normalizeSettings(readJSON(KEY.settings, {}));
 
-    function saveSettings() {
+    function saveSettings(options = {}) {
+        const opts = {
+            refreshSettings: options.refreshSettings !== false,
+            random: options.random !== false,
+            chart: options.chart === true,
+            color: options.color === true,
+        };
+
         settings = normalizeSettings(settings);
         localStorage.setItem(KEY.chartMemoryRecentTotal, String(settings.chart.recentTotal));
         writeJSON(KEY.settings, settings);
-        Toolbox.refreshSettingsPanel();
-        Toolbox.syncRandomControls();
-        Toolbox.updateMiniPanel();
-        ChartModule.render(true);
-        ColorModule.render();
+
+        if (opts.refreshSettings) Toolbox.refreshSettingsPanel();
+        if (opts.random) Toolbox.syncRandomControls();
+        else Toolbox.updateMiniPanel();
+        Toolbox.applyModuleState();
+
+        if (opts.chart) {
+            if (settings.modules.chart) ChartModule.render(true);
+            else ChartModule.removeOld();
+        }
+        if (opts.color) {
+            if (settings.modules.color) ColorModule.render();
+            else ColorModule.clearRendered();
+        }
     }
 
     function getByPath(obj, path) {
@@ -915,6 +931,20 @@
             }, 120);
         },
 
+        clearRendered() {
+            clearTimeout(this.renderTimer);
+            clearTimeout(this.autoTimer);
+            clearTimeout(this.contestTimer);
+            this.practiceAutoDone = false;
+
+            document.querySelectorAll('[data-tdk-diff-done="1"]').forEach(el => {
+                el.style.color = '';
+                el.style.fontWeight = '';
+                delete el.dataset.tdkDiff;
+                delete el.dataset.tdkDiffDone;
+            });
+        },
+
         init() {
             this.render();
             setTimeout(() => this.render(), 300);
@@ -1323,7 +1353,7 @@
 
         setRecentTotal(x) {
             settings.chart.recentTotal = Math.min(settings.chart.maxRecentTotal, Math.max(settings.chart.minRecentTotal, Math.floor(Number(x) || 50)));
-            saveSettings();
+            saveSettings({ refreshSettings: false, random: false });
             return settings.chart.recentTotal;
         },
 
@@ -2286,6 +2316,7 @@
 .tdk-lg-btn { height: 36px; border: none; border-radius: 11px; color: #fff; background: #3498db; font-weight: 800; cursor: pointer; transition: opacity .12s ease, transform .12s ease; font-size: 1em; }
 .tdk-lg-btn:hover { opacity: .88; transform: translateY(-1px); }
 .tdk-lg-btn:disabled { opacity: .55; cursor: not-allowed; transform: none; }
+.tdk-lg-diff-btn:disabled, .tdk-lg-switch:disabled, #tdk-lg-mini-diff:disabled, #tdk-lg-mini-black:disabled { opacity: .55; cursor: not-allowed; transform: none; }
 .tdk-lg-btn.main { grid-column: span 2; height: 40px; font-size: 1.05em; }
 .tdk-lg-btn.orange { background: #e67e22; }
 .tdk-lg-btn.red { background: #c0392b; }
@@ -2384,6 +2415,7 @@
             this.switchTab(this.activeTab);
             this.updateMiniPanel();
             this.updateRequestBadge();
+            this.applyModuleState();
 
             if (this.getUIState().minimized === true) this.setMinimized(true);
         },
@@ -2425,7 +2457,7 @@
                 btn.style.color = item.color;
                 btn.onclick = () => {
                     settings.random.difficulty = String(item.id);
-                    saveSettings();
+                    saveSettings({ refreshSettings: false, chart: false, color: false });
                     this.setActiveDifficulty(String(item.id));
                 };
                 grid.appendChild(btn);
@@ -2435,7 +2467,7 @@
             allow.checked = !!settings.random.allowAC;
             allow.onchange = () => {
                 settings.random.allowAC = allow.checked;
-                saveSettings();
+                saveSettings({ refreshSettings: false, chart: false, color: false });
             };
 
             this.setActiveDifficulty(settings.random.difficulty);
@@ -2474,6 +2506,27 @@
             const allow = document.getElementById('tdk-lg-allow-ac');
             if (allow) allow.checked = !!settings.random.allowAC;
             this.setActiveDifficulty(settings.random.difficulty);
+        },
+
+        applyModuleState() {
+            const box = document.getElementById('tdk-lg-box');
+            if (!box) return;
+
+            const toggle = (selector, enabled) => {
+                box.querySelectorAll(selector).forEach(el => {
+                    el.disabled = !enabled;
+                });
+            };
+
+            toggle('[data-action="random"], [data-action="refresh-pages"], [data-action="black-current"], [data-action="toggle-blacklist"], [data-action="clear-blacklist"], #tdk-lg-allow-ac, .tdk-lg-diff-btn, #tdk-lg-mini-diff, #tdk-lg-mini-black', settings.modules.random);
+            toggle('[data-action="rerender-color"], [data-action="clear-diff-cache"]', settings.modules.color);
+            toggle('[data-action="rerender-chart"], #tdk-lg-chart-recent', settings.modules.chart);
+
+            box.classList.toggle('tdk-random-disabled', !settings.modules.random);
+            box.classList.toggle('tdk-color-disabled', !settings.modules.color);
+            box.classList.toggle('tdk-chart-disabled', !settings.modules.chart);
+
+            if (!settings.modules.chart) ChartModule.removeOld();
         },
 
         renderBlacklistPanel() {
@@ -2547,8 +2600,26 @@
             const input = panel.querySelector('#tdk-lg-chart-recent');
             input.onchange = () => {
                 settings.chart.recentTotal = Number(input.value);
-                saveSettings();
+                saveSettings({ refreshSettings: false, random: false, chart: true });
             };
+        },
+
+        getSettingSaveOptions(path) {
+            const root = String(path || '').split('.')[0];
+            const options = {
+                refreshSettings: false,
+                random: root === 'random' || path === 'modules.random',
+                color: root === 'color' || path === 'modules.color',
+                chart: root === 'chart' || path === 'modules.chart',
+            };
+
+            if (root === 'modules') {
+                options.random = true;
+                if (path === 'modules.color') options.color = true;
+                if (path === 'modules.chart') options.chart = true;
+            }
+
+            return options;
         },
 
         refreshSettingsPanel() {
@@ -2580,10 +2651,6 @@
                         input.type = 'checkbox';
                         input.className = 'tdk-lg-switch';
                         input.checked = !!getByPath(settings, item.path);
-                        input.onchange = () => {
-                            setByPath(settings, item.path, input.checked);
-                            saveSettings();
-                        };
                     } else if (item.type === 'select') {
                         input = document.createElement('select');
                         for (const opt of item.options || []) {
@@ -2593,10 +2660,6 @@
                             input.appendChild(option);
                         }
                         input.value = String(getByPath(settings, item.path));
-                        input.onchange = () => {
-                            setByPath(settings, item.path, input.value);
-                            saveSettings();
-                        };
                     } else {
                         input = document.createElement('input');
                         input.type = 'number';
@@ -2604,15 +2667,12 @@
                         if (item.max !== undefined) input.max = item.max;
                         if (item.step !== undefined) input.step = item.step;
                         input.value = getByPath(settings, item.path);
-                        input.onchange = () => {
-                            let value = Number(input.value);
-                            if (item.min !== undefined || item.max !== undefined) {
-                                value = clamp(value, item.min ?? value, item.max ?? value);
-                            }
-                            setByPath(settings, item.path, value);
-                            saveSettings();
-                        };
                     }
+
+                    input.dataset.path = item.path;
+                    input.dataset.type = item.type;
+                    if (item.min !== undefined) input.dataset.min = String(item.min);
+                    if (item.max !== undefined) input.dataset.max = String(item.max);
 
                     row.appendChild(input);
                     box.appendChild(row);
@@ -2625,6 +2685,30 @@
             help.className = 'tdk-setting-help';
             help.textContent = '扩展方式：在脚本顶部 SETTING_SCHEMA 里添加配置项，并在 DEFAULT_SETTINGS 里给默认值；请求必须使用 RequestQueue.fetch/text/json/doc，才能保证全局不超过 2 次/秒。';
             panel.appendChild(help);
+        },
+
+        handleSettingChange(input) {
+            const path = input?.dataset?.path;
+            const type = input?.dataset?.type;
+            if (!path || !type) return;
+
+            let value;
+
+            if (type === 'boolean') {
+                value = input.checked;
+            } else if (type === 'number') {
+                const min = input.dataset.min === undefined ? undefined : Number(input.dataset.min);
+                const max = input.dataset.max === undefined ? undefined : Number(input.dataset.max);
+                value = Number(input.value);
+                if (min !== undefined || max !== undefined) value = clamp(value, min ?? value, max ?? value);
+            } else {
+                value = input.value;
+            }
+
+            setByPath(settings, path, value);
+            saveSettings(this.getSettingSaveOptions(path));
+
+            if (type === 'number') input.value = getByPath(settings, path);
         },
 
         switchTab(tab) {
@@ -2642,6 +2726,8 @@
             document.querySelectorAll('#tdk-lg-box .tdk-lg-btn').forEach(btn => {
                 btn.disabled = !!busy;
             });
+
+            if (!busy) this.applyModuleState();
         },
 
         async runRandom() {
@@ -2718,6 +2804,12 @@
                     ChartModule.render(true);
                     this.setStatus('已触发统计图刷新');
                 }
+            });
+
+            box.addEventListener('change', e => {
+                const input = e.target.closest('[data-path]');
+                if (!input || !box.contains(input)) return;
+                this.handleSettingChange(input);
             });
 
             document.querySelectorAll('.tdk-lg-tab').forEach(btn => {
