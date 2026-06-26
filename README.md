@@ -37,6 +37,22 @@ https://www.luogu.com.cn/*
 - 在“设置”页可开启或关闭随机题、难度染色、难度统计模块。
 - 在练习记录相关页面可查看难度统计图表。
 
+### 页面验证
+
+已在洛谷题目列表页验证脚本可正常注入并显示工具箱面板：
+
+```text
+https://www.luogu.com.cn/problem/list
+```
+
+随机题面板：
+
+![洛谷工具箱随机题面板](image/luogu-toolbox-random.png)
+
+设置面板：
+
+![洛谷工具箱设置面板](image/luogu-toolbox-settings.png)
+
 ### 本地数据
 
 脚本设置、UI 位置、随机题页数缓存、拉黑列表、难度缓存和统计参数保存在浏览器 `localStorage` 中。清理浏览器站点数据会同时清除这些配置。
