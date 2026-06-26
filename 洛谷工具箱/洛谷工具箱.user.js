@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         洛谷工具箱（随机题 / 难度染色 / 难度统计）
 // @namespace    https://github.com/thedyingkai/tampermonkey
-// @version      3.0.0
+// @version      3.0.1
 // @description  合并洛谷随机题、难度染色、练习难度统计；统一可扩展设置界面；全部 fetch 请求统一限制为最多 2 次/秒
 // @author       thedyingkai
 // @match        https://www.luogu.com.cn/*
@@ -9,6 +9,8 @@
 // @license      MIT
 // @grant        none
 // @run-at       document-end
+// @downloadURL  https://raw.githubusercontent.com/thedyingkai/tampermonkey/main/%E6%B4%9B%E8%B0%B7%E5%B7%A5%E5%85%B7%E7%AE%B1/%E6%B4%9B%E8%B0%B7%E5%B7%A5%E5%85%B7%E7%AE%B1.user.js
+// @updateURL    https://raw.githubusercontent.com/thedyingkai/tampermonkey/main/%E6%B4%9B%E8%B0%B7%E5%B7%A5%E5%85%B7%E7%AE%B1/%E6%B4%9B%E8%B0%B7%E5%B7%A5%E5%85%B7%E7%AE%B1.user.js
 // ==/UserScript==
 
 (function () {
@@ -193,17 +195,10 @@
         }
     }
 
-    let settings = deepMerge(DEFAULT_SETTINGS, readJSON(KEY.settings, {}));
-
-    settings.request.maxPerSecond = clamp(settings.request.maxPerSecond, 0.2, 2);
-    settings.request.cooldownMs = Math.floor(clamp(settings.request.cooldownMs, 1000, 60000));
-    settings.chart.recentTotal = Math.floor(clamp(settings.chart.recentTotal, settings.chart.minRecentTotal, settings.chart.maxRecentTotal));
+    let settings = normalizeSettings(readJSON(KEY.settings, {}));
 
     function saveSettings() {
-        settings.request.maxPerSecond = clamp(settings.request.maxPerSecond, 0.2, 2);
-        settings.request.cooldownMs = Math.floor(clamp(settings.request.cooldownMs, 1000, 60000));
-        settings.random.difficulty = String(settings.random.difficulty || '3');
-        settings.chart.recentTotal = Math.floor(clamp(settings.chart.recentTotal, settings.chart.minRecentTotal, settings.chart.maxRecentTotal));
+        settings = normalizeSettings(settings);
         localStorage.setItem(KEY.chartMemoryRecentTotal, String(settings.chart.recentTotal));
         writeJSON(KEY.settings, settings);
         Toolbox.refreshSettingsPanel();
@@ -222,6 +217,46 @@
         let cur = obj;
         for (let i = 0; i + 1 < keys.length; i++) cur = cur[keys[i]];
         cur[keys[keys.length - 1]] = value;
+    }
+
+    function normalizeSettings(input) {
+        const next = deepMerge(DEFAULT_SETTINGS, input && typeof input === 'object' && !Array.isArray(input) ? input : {});
+
+        next.modules = next.modules && typeof next.modules === 'object' && !Array.isArray(next.modules) ? next.modules : structuredCloneSafe(DEFAULT_SETTINGS.modules);
+        next.request = next.request && typeof next.request === 'object' && !Array.isArray(next.request) ? next.request : structuredCloneSafe(DEFAULT_SETTINGS.request);
+        next.random = next.random && typeof next.random === 'object' && !Array.isArray(next.random) ? next.random : structuredCloneSafe(DEFAULT_SETTINGS.random);
+        next.color = next.color && typeof next.color === 'object' && !Array.isArray(next.color) ? next.color : structuredCloneSafe(DEFAULT_SETTINGS.color);
+        next.chart = next.chart && typeof next.chart === 'object' && !Array.isArray(next.chart) ? next.chart : structuredCloneSafe(DEFAULT_SETTINGS.chart);
+
+        for (const key of Object.keys(DEFAULT_SETTINGS.modules)) {
+            next.modules[key] = next.modules[key] !== false;
+        }
+
+        next.request.maxPerSecond = clamp(next.request.maxPerSecond, 0.2, 2);
+        next.request.cooldownMs = Math.floor(clamp(next.request.cooldownMs, 1000, 60000));
+
+        next.random.difficulty = validDiff(next.random.difficulty) && Number(next.random.difficulty) > 0 ? String(Number(next.random.difficulty)) : '3';
+        next.random.allowAC = next.random.allowAC === true;
+        next.random.cacheTtlDays = Math.floor(clamp(next.random.cacheTtlDays, 1, 30));
+        next.random.maxReasonablePage = Math.floor(clamp(next.random.maxReasonablePage, 1, 10000));
+        next.random.maxRandomAttempt = Math.floor(clamp(next.random.maxRandomAttempt, 5, 200));
+        next.random.autoMinimize = next.random.autoMinimize !== false;
+
+        next.color.autoFetchFirstBatch = next.color.autoFetchFirstBatch !== false;
+        next.color.autoContinueBatch = next.color.autoContinueBatch !== false;
+        next.color.batchSize = Math.floor(clamp(next.color.batchSize, 1, 200));
+        next.color.concurrency = Math.floor(clamp(next.color.concurrency, 1, 20));
+        next.color.blockGapMs = Math.floor(clamp(next.color.blockGapMs, 0, 60000));
+        next.color.noProgressGapMs = Math.floor(clamp(next.color.noProgressGapMs, 0, 60000));
+        next.color.problemPageFallback = next.color.problemPageFallback !== false;
+
+        next.chart.minRecentTotal = Math.floor(clamp(next.chart.minRecentTotal, 1, 300));
+        next.chart.maxRecentTotal = Math.floor(clamp(next.chart.maxRecentTotal, next.chart.minRecentTotal, 300));
+        next.chart.recentTotal = Math.floor(clamp(next.chart.recentTotal, next.chart.minRecentTotal, next.chart.maxRecentTotal));
+        next.chart.recordPageLimit = Math.floor(clamp(next.chart.recordPageLimit, 1, 100));
+        next.chart.replaceHomeSlider = next.chart.replaceHomeSlider !== false;
+
+        return next;
     }
 
     function getPidFromHref(href) {
@@ -1060,11 +1095,11 @@
                     return;
                 }
 
-                const match = url.pathname.match(/^\/problem\/([A-Z0-9]+)$/i);
+                const match = url.pathname.match(/^\/problem\/([A-Za-z0-9_.-]+)$/);
                 if (!match) return;
 
                 const pid = match[1];
-                if (!pid || !/^[A-Z0-9]+$/i.test(pid)) return;
+                if (!pid || !/^[A-Za-z0-9_.-]+$/.test(pid)) return;
 
                 const row = this.findProblemRowFromAnchor(a);
                 const accepted = this.rowLooksAccepted(row);
@@ -1248,6 +1283,7 @@
 
             settings.random.difficulty = String(diff);
             settings.random.allowAC = !!allowAC;
+            settings = normalizeSettings(settings);
             writeJSON(KEY.settings, settings);
 
             const pid = await this.pickProblem(settings.random.difficulty, settings.random.allowAC);
@@ -1276,6 +1312,9 @@
         STYLE_ID: 'tdk-luogu-chart-style',
         HOME_WRAP_ID: 'tdk-luogu-difficulty-chart-wrap',
         renderLock: false,
+        renderRevision: 0,
+        pendingRender: false,
+        pendingForce: false,
 
         getRecentTotal() {
             const x = Number(settings.chart.recentTotal || 50);
@@ -1448,6 +1487,8 @@
         },
 
         removeOld() {
+            this.renderRevision++;
+
             const old = document.getElementById(this.CARD_ID);
             if (old) {
                 if (old.__tdkResizeHandler) window.removeEventListener('resize', old.__tdkResizeHandler);
@@ -1456,6 +1497,16 @@
 
             const wrap = document.getElementById(this.HOME_WRAP_ID);
             if (wrap && !wrap.querySelector(`#${this.CARD_ID}`)) wrap.remove();
+
+            document.querySelectorAll('[data-tdk-chart-hidden="1"]').forEach(node => {
+                node.style.display = node.dataset.tdkChartDisplay || '';
+                delete node.dataset.tdkChartHidden;
+                delete node.dataset.tdkChartDisplay;
+            });
+        },
+
+        isStaleRender(revision, href) {
+            return revision !== this.renderRevision || href !== location.href;
         },
 
         findCardByTitle(title, root = document) {
@@ -1527,29 +1578,32 @@
             const target = await this.waitInsertTarget(kind);
             if (!target) throw new Error('没有找到指定插入位置');
 
-            if (kind === 'home' && target.mode === 'replace') {
-                const wrapper = document.createElement('div');
-                wrapper.className = target.node.className || 'am-u-md-8';
-                wrapper.id = this.HOME_WRAP_ID;
-
-                const card = document.createElement('div');
-                card.id = this.CARD_ID;
-                card.className = 'l-card tdk-home-card';
-
-                wrapper.appendChild(card);
-                target.node.replaceWith(wrapper);
-                return card;
-            }
-
             const card = document.createElement('div');
             card.id = this.CARD_ID;
             card.className = 'l-card';
+            if (kind === 'home') card.classList.add('tdk-home-card');
             if (kind === 'practice') card.classList.add('tdk-practice-card');
             if (kind === 'user') card.classList.add('tdk-user-card');
 
-            if (target.mode === 'replace') target.node.replaceWith(card);
-            else if (target.mode === 'before') target.node.before(card);
-            else target.node.prepend(card);
+            if (target.mode === 'replace') {
+                target.node.dataset.tdkChartHidden = '1';
+                target.node.dataset.tdkChartDisplay = target.node.style.display || '';
+                target.node.style.display = 'none';
+
+                if (kind === 'home') {
+                    const wrapper = document.createElement('div');
+                    wrapper.className = target.node.className || 'am-u-md-8';
+                    wrapper.id = this.HOME_WRAP_ID;
+                    wrapper.appendChild(card);
+                    target.node.before(wrapper);
+                } else {
+                    target.node.before(card);
+                }
+            } else if (target.mode === 'before') {
+                target.node.before(card);
+            } else {
+                target.node.prepend(card);
+            }
 
             return card;
         },
@@ -1832,7 +1886,6 @@
             const passed = this.findPassedArray(json);
 
             if (!passed) {
-                console.log('[TDK Luogu Toolbox] raw practice json:', json);
                 throw new Error('JSON 中没有找到 passed 数组');
             }
 
@@ -2078,7 +2131,11 @@
         },
 
         async render(force = false) {
-            if (this.renderLock) return;
+            if (this.renderLock) {
+                this.pendingRender = true;
+                this.pendingForce = this.pendingForce || force;
+                return;
+            }
 
             if (!this.shouldRun()) {
                 this.removeOld();
@@ -2088,18 +2145,26 @@
             if (!force && document.getElementById(this.CARD_ID)) return;
 
             this.renderLock = true;
+            const revision = ++this.renderRevision;
+            const href = location.href;
 
             const kind = this.getPageKind();
             let uid = null;
 
             try {
                 uid = await this.waitUid(kind);
+                if (this.isStaleRender(revision, href)) return;
 
                 if (kind !== 'practice') await this.renderLoading(uid, kind);
+                if (this.isStaleRender(revision, href)) return;
 
                 const rows = await this.getRows(uid, kind);
+                if (this.isStaleRender(revision, href)) return;
+
                 await this.renderChart(uid, kind, rows);
             } catch (err) {
+                if (this.isStaleRender(revision, href)) return;
+
                 console.error('[TDK Luogu Toolbox] chart:', err);
                 try {
                     await this.renderError(uid, kind, err);
@@ -2109,6 +2174,13 @@
                 }
             } finally {
                 this.renderLock = false;
+
+                if (this.pendingRender) {
+                    const nextForce = this.pendingForce;
+                    this.pendingRender = false;
+                    this.pendingForce = false;
+                    setTimeout(() => this.render(nextForce), 0);
+                }
             }
         },
     };

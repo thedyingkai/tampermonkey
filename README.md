@@ -11,7 +11,7 @@
 安装 Tampermonkey 或 Violentmonkey 后，打开脚本文件即可安装：
 
 ```text
-https://github.com/thedyingkai/tampermonkey/raw/main/%E6%B4%9B%E8%B0%B7%E5%B7%A5%E5%85%B7%E7%AE%B1/%E6%B4%9B%E8%B0%B7%E5%B7%A5%E5%85%B7%E7%AE%B1.user.js
+https://raw.githubusercontent.com/thedyingkai/tampermonkey/main/%E6%B4%9B%E8%B0%B7%E5%B7%A5%E5%85%B7%E7%AE%B1/%E6%B4%9B%E8%B0%B7%E5%B7%A5%E5%85%B7%E7%AE%B1.user.js
 ```
 
 脚本适用于：
