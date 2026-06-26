@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         洛谷工具箱（随机题 / 难度染色 / 难度统计）
 // @namespace    https://github.com/thedyingkai/tampermonkey
-// @version      3.0.2
+// @version      3.0.3
 // @description  合并洛谷随机题、难度染色、练习难度统计；统一可扩展设置界面；全部 fetch 请求统一限制为最多 2 次/秒
 // @author       thedyingkai
 // @match        https://www.luogu.com.cn/*
@@ -306,6 +306,7 @@
         lastStart: 0,
         total: 0,
         active: 0,
+        textPending: new Map(),
 
         get interval() {
             return Math.ceil(1000 / clamp(settings.request.maxPerSecond, 0.2, 2));
@@ -329,6 +330,19 @@
 
             const wait = this.lastStart + this.interval - Date.now();
             if (wait > 0) await sleep(wait);
+        },
+
+        getDedupKey(url, options = {}) {
+            const method = String(options.method || 'GET').toUpperCase();
+            if (method !== 'GET') return '';
+
+            const headers = options.headers || {};
+            const headerKey = Object.keys(headers)
+                .sort()
+                .map(key => `${key}:${headers[key]}`)
+                .join('|');
+
+            return `${method} ${url} ${headerKey}`;
         },
 
         fetch(url, options = {}) {
@@ -372,9 +386,24 @@
         },
 
         async text(url, options = {}) {
-            const res = await this.fetch(url, options);
-            if (!res.ok) throw new Error(`请求失败：HTTP ${res.status}`);
-            return await res.text();
+            const key = this.getDedupKey(url, options);
+            if (key && this.textPending.has(key)) return this.textPending.get(key);
+
+            const promise = (async () => {
+                const res = await this.fetch(url, options);
+                if (!res.ok) throw new Error(`请求失败：HTTP ${res.status}`);
+                return await res.text();
+            })();
+
+            if (key) {
+                this.textPending.set(key, promise);
+                promise.then(
+                    () => this.textPending.delete(key),
+                    () => this.textPending.delete(key),
+                );
+            }
+
+            return promise;
         },
 
         async json(url, options = {}) {
@@ -409,6 +438,8 @@
 
     const ProblemDifficulty = {
         cache: {},
+        pending: new Map(),
+        saveTimer: null,
 
         init() {
             this.cache = readJSON(KEY.diffCache, {});
@@ -421,7 +452,17 @@
         },
 
         save() {
+            clearTimeout(this.saveTimer);
+            this.saveTimer = null;
             writeJSON(KEY.diffCache, this.cache);
+        },
+
+        scheduleSave(delay = 300) {
+            clearTimeout(this.saveTimer);
+            this.saveTimer = setTimeout(() => {
+                this.saveTimer = null;
+                this.save();
+            }, delay);
         },
 
         get(pid) {
@@ -506,30 +547,44 @@
         },
 
         async fetchByPid(pid) {
+            pid = String(pid || '');
+            if (!pid) return null;
+
             const cached = this.get(pid);
             if (cached !== null) return cached;
 
-            let text = await RequestQueue.text(`/problem/list?keyword=${encodeURIComponent(pid)}`, requestOptions());
-            let diff = this.parseProblemText(text, pid, false);
+            if (this.pending.has(pid)) return this.pending.get(pid);
 
-            if (validDiff(diff)) {
-                this.put(pid, diff);
-                this.save();
-                return Number(diff);
-            }
+            const promise = (async () => {
+                let text = await RequestQueue.text(`/problem/list?keyword=${encodeURIComponent(pid)}`, requestOptions());
+                let diff = this.parseProblemText(text, pid, false);
 
-            if (!settings.color.problemPageFallback) return null;
+                if (validDiff(diff)) {
+                    this.put(pid, diff);
+                    this.scheduleSave();
+                    return Number(diff);
+                }
 
-            text = await RequestQueue.text(`/problem/${encodeURIComponent(pid)}`, requestOptions());
-            diff = this.parseProblemText(text, pid, true);
+                if (!settings.color.problemPageFallback) return null;
 
-            if (validDiff(diff)) {
-                this.put(pid, diff);
-                this.save();
-                return Number(diff);
-            }
+                text = await RequestQueue.text(`/problem/${encodeURIComponent(pid)}`, requestOptions());
+                diff = this.parseProblemText(text, pid, true);
 
-            return null;
+                if (validDiff(diff)) {
+                    this.put(pid, diff);
+                    this.scheduleSave();
+                    return Number(diff);
+                }
+
+                return null;
+            })();
+
+            this.pending.set(pid, promise);
+            promise.then(
+                () => this.pending.delete(pid),
+                () => this.pending.delete(pid),
+            );
+            return promise;
         },
     };
 
@@ -559,6 +614,8 @@
             diff = Number(diff);
             if (!validDiff(diff) || !el) return false;
 
+            if (el.dataset.tdkDiffDone === '1' && Number(el.dataset.tdkDiff) === diff) return false;
+
             el.style.color = COLOR[diff];
             el.style.fontWeight = 'bold';
             el.dataset.tdkDiff = String(diff);
@@ -580,6 +637,7 @@
             if (!Array.isArray(res)) return;
 
             const mp = new Map();
+            let cacheChanged = false;
 
             for (const item of res) {
                 const p = item && item.problem;
@@ -591,10 +649,10 @@
                 if (!validDiff(diff)) continue;
 
                 mp.set(pid, diff);
-                ProblemDifficulty.put(pid, diff);
+                if (ProblemDifficulty.get(pid) !== diff && ProblemDifficulty.put(pid, diff)) cacheChanged = true;
             }
 
-            ProblemDifficulty.save();
+            if (cacheChanged) ProblemDifficulty.save();
 
             document.querySelectorAll('a[href*="/problem/"], .pid').forEach(el => {
                 const pid = getPid(el);
@@ -896,7 +954,8 @@
             this.contestFetching = true;
 
             try {
-                const tasks = missing.map(pid => async () => {
+                const batch = missing.slice(0, Math.max(1, Math.floor(settings.color.batchSize || 60)));
+                const tasks = batch.map(pid => async () => {
                     try {
                         const diff = await ProblemDifficulty.fetchByPid(pid);
                         if (!validDiff(diff)) return;
@@ -931,6 +990,19 @@
             }, 120);
         },
 
+        shouldIgnoreMutation(mutations) {
+            return mutations.every(mutation => {
+                const target = mutation.target;
+                if (target && target.closest && target.closest('#tdk-lg-box, #tdk-luogu-difficulty-chart, #tdk-luogu-difficulty-chart-wrap')) return true;
+
+                return Array.from(mutation.addedNodes || []).every(node => {
+                    if (!node || node.nodeType !== 1) return true;
+                    if (node.matches && node.matches('#tdk-lg-box, #tdk-luogu-difficulty-chart, #tdk-luogu-difficulty-chart-wrap')) return true;
+                    return !!(node.closest && node.closest('#tdk-lg-box, #tdk-luogu-difficulty-chart, #tdk-luogu-difficulty-chart-wrap'));
+                });
+            });
+        },
+
         clearRendered() {
             clearTimeout(this.renderTimer);
             clearTimeout(this.autoTimer);
@@ -957,7 +1029,10 @@
                 } catch (_) { }
             }
 
-            const observer = new MutationObserver(() => this.render());
+            const observer = new MutationObserver(mutations => {
+                if (this.shouldIgnoreMutation(mutations)) return;
+                this.render();
+            });
             observer.observe(document.body, {
                 childList: true,
                 subtree: true,
@@ -2986,7 +3061,7 @@
             const node = document.getElementById('tdk-lg-request');
             if (!node) return;
 
-            node.innerText = `请求限速：≤ ${clamp(settings.request.maxPerSecond, 0.2, 2)} 次/秒；排队 ${RequestQueue.queue.length}；进行中 ${RequestQueue.active}；总请求 ${RequestQueue.total}`;
+            node.innerText = `请求限速：≤ ${clamp(settings.request.maxPerSecond, 0.2, 2)} 次/秒；排队 ${RequestQueue.queue.length}；进行中 ${RequestQueue.active}；合并 ${RequestQueue.textPending.size}；总请求 ${RequestQueue.total}`;
         },
     };
 
