@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         洛谷工具箱（随机题 / 难度染色 / 难度统计）
 // @namespace    https://github.com/thedyingkai/tampermonkey
-// @version      3.0.3
+// @version      3.1.0
 // @description  合并洛谷随机题、难度染色、练习难度统计；统一可扩展设置界面；全部 fetch 请求统一限制为最多 2 次/秒
 // @author       thedyingkai
 // @match        https://www.luogu.com.cn/*
@@ -57,11 +57,22 @@
         },
         random: {
             difficulty: localStorage.getItem(KEY.oldRandomDiff) || '3',
+            difficultyPool: ['3'],
             allowAC: localStorage.getItem(KEY.oldAllowAC) === '1',
             cacheTtlDays: 7,
             maxReasonablePage: 1000,
             maxRandomAttempt: 40,
             autoMinimize: true,
+            setTotal: 8,
+            setWeights: {
+                1: 1,
+                2: 2,
+                3: 3,
+                4: 2,
+                5: 1,
+                6: 0,
+                7: 0,
+            },
         },
         color: {
             autoFetchFirstBatch: true,
@@ -105,6 +116,7 @@
                 { path: 'random.autoMinimize', label: '随机成功后自动最小化', type: 'boolean' },
                 { path: 'random.cacheTtlDays', label: '页数缓存有效期（天）', type: 'number', min: 1, max: 30, step: 1 },
                 { path: 'random.maxRandomAttempt', label: '随机空页最大重试次数', type: 'number', min: 5, max: 200, step: 1 },
+                { path: 'random.setTotal', label: '组题默认总题数', type: 'number', min: 1, max: 50, step: 1 },
             ],
         },
         {
@@ -236,7 +248,10 @@
     }
 
     function normalizeSettings(input) {
-        const next = deepMerge(DEFAULT_SETTINGS, input && typeof input === 'object' && !Array.isArray(input) ? input : {});
+        const source = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
+        const sourceRandom = source.random && typeof source.random === 'object' && !Array.isArray(source.random) ? source.random : null;
+        const hasDifficultyPool = !!sourceRandom && Object.prototype.hasOwnProperty.call(sourceRandom, 'difficultyPool');
+        const next = deepMerge(DEFAULT_SETTINGS, source);
 
         next.modules = next.modules && typeof next.modules === 'object' && !Array.isArray(next.modules) ? next.modules : structuredCloneSafe(DEFAULT_SETTINGS.modules);
         next.request = next.request && typeof next.request === 'object' && !Array.isArray(next.request) ? next.request : structuredCloneSafe(DEFAULT_SETTINGS.request);
@@ -252,11 +267,22 @@
         next.request.cooldownMs = Math.floor(clamp(next.request.cooldownMs, 1000, 60000));
 
         next.random.difficulty = validDiff(next.random.difficulty) && Number(next.random.difficulty) > 0 ? String(Number(next.random.difficulty)) : '3';
+        next.random.difficultyPool = hasDifficultyPool && Array.isArray(next.random.difficultyPool)
+            ? Array.from(new Set(next.random.difficultyPool.map(x => String(Number(x))).filter(x => validDiff(x) && Number(x) > 0)))
+            : [next.random.difficulty];
+        if (!next.random.difficultyPool.length) next.random.difficultyPool = [next.random.difficulty];
         next.random.allowAC = next.random.allowAC === true;
         next.random.cacheTtlDays = Math.floor(clamp(next.random.cacheTtlDays, 1, 30));
         next.random.maxReasonablePage = Math.floor(clamp(next.random.maxReasonablePage, 1, 10000));
         next.random.maxRandomAttempt = Math.floor(clamp(next.random.maxRandomAttempt, 5, 200));
         next.random.autoMinimize = next.random.autoMinimize !== false;
+        next.random.setTotal = Math.floor(clamp(next.random.setTotal, 1, 50));
+        next.random.setWeights = next.random.setWeights && typeof next.random.setWeights === 'object' && !Array.isArray(next.random.setWeights)
+            ? next.random.setWeights
+            : structuredCloneSafe(DEFAULT_SETTINGS.random.setWeights);
+        for (const item of DIFFICULTIES.slice(1)) {
+            next.random.setWeights[item.id] = Math.floor(clamp(next.random.setWeights[item.id] ?? 0, 0, 50));
+        }
 
         next.color.autoFetchFirstBatch = next.color.autoFetchFirstBatch !== false;
         next.color.autoContinueBatch = next.color.autoContinueBatch !== false;
@@ -1352,33 +1378,123 @@
             return entry;
         },
 
-        async pickProblem(diff, allowAC) {
-            const entry = await this.getMaxPageWithCache(diff);
-            const blacklist = this.getBlacklist();
-            const maxAttempt = Math.max(1, Math.floor(settings.random.maxRandomAttempt || 40));
+        filterCandidates(problems, allowAC, exclude = new Set()) {
+            const blacklist = new Set(this.getBlacklist());
 
-            for (let attempt = 1; attempt <= maxAttempt; attempt++) {
+            return problems.filter(item => {
+                if (!item || !item.pid) return false;
+
+                const pid = String(item.pid);
+                if (blacklist.has(pid)) return false;
+                if (exclude.has(pid)) return false;
+                if (!allowAC && item.accepted) return false;
+
+                return true;
+            }).map(item => String(item.pid));
+        },
+
+        async pickProblems(diff, count = 1, allowAC = settings.random.allowAC, exclude = new Set()) {
+            const entry = await this.getMaxPageWithCache(diff);
+            const maxAttempt = Math.max(1, Math.floor(settings.random.maxRandomAttempt || 40));
+            const picked = [];
+            const used = new Set(exclude);
+
+            for (let attempt = 1; picked.length < count && attempt <= maxAttempt; attempt++) {
                 const page = this.rand(1, entry.maxPage);
 
                 Toolbox.setStatus('随机第 ' + page + '/' + entry.maxPage + ' 页，第 ' + attempt + ' 次尝试...');
 
                 const problems = await this.fetchPageProblems(diff, page, true);
-                const candidates = problems.filter(item => {
-                    if (!item || !item.pid) return false;
-
-                    const pid = String(item.pid);
-                    if (blacklist.includes(pid)) return false;
-                    if (!allowAC && item.accepted) return false;
-
-                    return true;
-                }).map(item => String(item.pid));
+                const candidates = this.filterCandidates(problems, allowAC, used);
 
                 this.shuffle(candidates);
 
-                if (candidates.length > 0) return candidates[0];
+                for (const pid of candidates) {
+                    if (picked.length >= count) break;
+                    used.add(pid);
+                    picked.push(pid);
+                }
             }
 
-            throw new Error('连续多次没有可抽题目，可能该难度题目大多已 AC 或被拉黑');
+            if (picked.length < count) {
+                throw new Error('连续多次没有可抽题目，可能该难度题目大多已 AC 或被拉黑');
+            }
+
+            return picked;
+        },
+
+        async pickProblem(diff, allowAC, exclude = new Set()) {
+            return (await this.pickProblems(diff, 1, allowAC, exclude))[0];
+        },
+
+        getDifficultyPool() {
+            const pool = Array.isArray(settings.random.difficultyPool) ? settings.random.difficultyPool : [settings.random.difficulty];
+            const res = Array.from(new Set(pool.map(x => String(Number(x))).filter(x => validDiff(x) && Number(x) > 0)));
+            return res.length ? res : [String(settings.random.difficulty || '3')];
+        },
+
+        async pickProblemFromPool(pool = this.getDifficultyPool(), allowAC = settings.random.allowAC, exclude = new Set()) {
+            const candidates = this.shuffle(Array.from(new Set(pool.map(x => String(Number(x))).filter(x => validDiff(x) && Number(x) > 0))));
+            let lastError = null;
+
+            for (const diff of candidates) {
+                try {
+                    const pid = await this.pickProblem(diff, allowAC, exclude);
+                    return { pid, diff: Number(diff) };
+                } catch (err) {
+                    lastError = err;
+                }
+            }
+
+            throw lastError || new Error('所选难度池中没有可抽题目');
+        },
+
+        getWeightedPlan(total = settings.random.setTotal) {
+            total = Math.floor(clamp(total, 1, 50));
+            const rows = DIFFICULTIES.slice(1).map(item => ({
+                diff: item.id,
+                weight: Math.max(0, Number(settings.random.setWeights?.[item.id] || 0)),
+                count: 0,
+                frac: 0,
+            })).filter(item => item.weight > 0);
+
+            if (!rows.length) throw new Error('组题权重全为 0，请至少给一个难度设置权重');
+
+            const sum = rows.reduce((s, item) => s + item.weight, 0);
+            let used = 0;
+
+            for (const item of rows) {
+                const raw = total * item.weight / sum;
+                item.count = Math.floor(raw);
+                item.frac = raw - item.count;
+                used += item.count;
+            }
+
+            rows.sort((a, b) => b.frac - a.frac || b.weight - a.weight || a.diff - b.diff);
+            for (let i = 0; used < total; i++, used++) rows[i % rows.length].count++;
+            rows.sort((a, b) => a.diff - b.diff);
+
+            return rows.filter(item => item.count > 0).map(item => ({ diff: item.diff, count: item.count }));
+        },
+
+        async buildProblemSet(total = settings.random.setTotal, allowAC = settings.random.allowAC) {
+            if (!settings.modules.random) throw new Error('随机题模块已关闭');
+
+            const plan = this.getWeightedPlan(total);
+            const used = new Set();
+            const result = [];
+
+            for (const item of plan) {
+                Toolbox.setStatus(`正在组题：难度 ${item.diff}，目标 ${item.count} 道`);
+
+                const pids = await this.pickProblems(String(item.diff), item.count, allowAC, used);
+                for (const pid of pids) {
+                    used.add(pid);
+                    result.push({ pid, diff: item.diff });
+                }
+            }
+
+            return { plan, problems: result };
         },
 
         async randomProblem(diff = settings.random.difficulty, allowAC = settings.random.allowAC) {
@@ -1391,8 +1507,11 @@
             settings = normalizeSettings(settings);
             writeJSON(KEY.settings, settings);
 
-            const pid = await this.pickProblem(settings.random.difficulty, settings.random.allowAC);
-            Toolbox.setStatus('抽中 ' + pid + '，正在打开...');
+            const picked = await this.pickProblemFromPool(this.getDifficultyPool(), settings.random.allowAC);
+            const pid = picked.pid;
+            settings.random.difficulty = String(picked.diff);
+            writeJSON(KEY.settings, settings);
+            Toolbox.setStatus('抽中 ' + pid + '，难度 ' + picked.diff + '，正在打开...');
 
             if (settings.random.autoMinimize) Toolbox.setMinimized(true);
             location.href = buildProblemUrl(pid);
@@ -2292,6 +2411,7 @@
 
     const Toolbox = {
         activeTab: 'random',
+        lastProblemSet: null,
 
         getUIState() {
             return readJSON(KEY.ui, {});
@@ -2404,6 +2524,13 @@
 .tdk-lg-black-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px; border-radius: 9px; background: #fff; margin-bottom: 6px; box-shadow: 0 1px 4px rgba(0,0,0,.05); }
 .tdk-lg-black-item a { color: #3498db; font-weight: 800; text-decoration: none; }
 .tdk-lg-black-item button { width: 48px; height: 26px; border: none; border-radius: 8px; background: #e74c3c; color: #fff; font-weight: 800; cursor: pointer; }
+.tdk-lg-section-title { margin: 12px 0 8px; font-weight: 900; color: #444; }
+.tdk-lg-weight-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin-bottom: 10px; }
+.tdk-lg-weight-item { display: grid; grid-template-columns: 1fr 54px; align-items: center; gap: 6px; padding: 7px 8px; border-radius: 10px; background: #f7f8fa; font-weight: 750; }
+.tdk-lg-weight-item input { width: 54px; height: 28px; border: 1px solid #ddd; border-radius: 8px; padding: 2px 5px; text-align: center; background: #fff; }
+.tdk-lg-result { display: none; margin-top: 10px; padding: 9px 10px; border-radius: 12px; background: #f7f8fa; color: #555; font-size: .88em; line-height: 1.55; word-break: break-word; }
+.tdk-lg-result.show { display: block; }
+.tdk-lg-result textarea { width: 100%; min-height: 72px; margin-top: 6px; resize: vertical; border: 1px solid #ddd; border-radius: 8px; padding: 7px; font-family: Consolas, monospace; font-size: .95em; }
 .tdk-setting-section { margin: 8px 0 12px; padding: 10px; border-radius: 12px; background: #f7f8fa; }
 .tdk-setting-section h4 { margin: 0 0 8px; font-size: .98em; }
 .tdk-setting-item { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; padding: 6px 0; color: #555; }
@@ -2437,7 +2564,7 @@
 
             const miniDiff = document.createElement('button');
             miniDiff.id = 'tdk-lg-mini-diff';
-            miniDiff.title = '点击继续随机当前难度';
+            miniDiff.title = '点击从当前难度池继续随机';
 
             const miniBlack = document.createElement('button');
             miniBlack.id = 'tdk-lg-mini-black';
@@ -2507,7 +2634,7 @@
             if (!panel) return;
 
             panel.innerHTML = `
-<p class="tdk-lg-desc">按难度随机打开一道洛谷题，支持过滤已 AC、拉黑题目、缓存最大页。</p>
+<p class="tdk-lg-desc">从一个或多个难度中随机打开洛谷题，支持过滤已 AC、拉黑题目、缓存最大页。</p>
 <div id="tdk-lg-diff-grid"></div>
 <div class="tdk-lg-row">
     <label for="tdk-lg-allow-ac">允许随机已 AC 题</label>
@@ -2515,12 +2642,25 @@
 </div>
 <div class="tdk-lg-actions">
     <button class="tdk-lg-btn main" data-action="random">随机一道题</button>
-    <button class="tdk-lg-btn orange" data-action="refresh-pages">刷新页数</button>
+    <button class="tdk-lg-btn orange" data-action="refresh-pages">刷新难度池页数</button>
     <button class="tdk-lg-btn red" data-action="black-current">拉黑当前</button>
     <button class="tdk-lg-btn purple" data-action="toggle-blacklist">拉黑列表</button>
     <button class="tdk-lg-btn gray" data-action="clear-blacklist">清空拉黑</button>
 </div>
 <div id="tdk-lg-blacklist"></div>
+<div class="tdk-lg-section-title">按权重组题</div>
+<div class="tdk-lg-row">
+    <label for="tdk-lg-set-total">总题数</label>
+    <input id="tdk-lg-set-total" type="number" min="1" max="50" value="${settings.random.setTotal}" style="width:84px;height:28px;border:1px solid #ddd;border-radius:8px;padding:2px 6px;">
+</div>
+<div id="tdk-lg-weight-grid" class="tdk-lg-weight-grid"></div>
+<div class="tdk-lg-actions">
+    <button class="tdk-lg-btn main" data-action="build-problem-set">生成题号列表</button>
+    <button class="tdk-lg-btn orange" data-action="copy-problem-set">复制题号</button>
+    <button class="tdk-lg-btn purple" data-action="open-training-page">打开题单页</button>
+    <button class="tdk-lg-btn gray" data-action="open-contest-page">打开比赛页</button>
+</div>
+<div id="tdk-lg-set-result" class="tdk-lg-result"></div>
             `;
 
             const grid = panel.querySelector('#tdk-lg-diff-grid');
@@ -2531,11 +2671,40 @@
                 btn.textContent = item.name;
                 btn.style.color = item.color;
                 btn.onclick = () => {
-                    settings.random.difficulty = String(item.id);
+                    const value = String(item.id);
+                    const pool = new Set(RandomModule.getDifficultyPool());
+                    if (pool.has(value) && pool.size > 1) pool.delete(value);
+                    else pool.add(value);
+                    settings.random.difficultyPool = Array.from(pool);
+                    settings.random.difficulty = value;
                     saveSettings({ refreshSettings: false, chart: false, color: false });
-                    this.setActiveDifficulty(String(item.id));
+                    this.setActiveDifficulty(value);
                 };
                 grid.appendChild(btn);
+            }
+
+            const weightGrid = panel.querySelector('#tdk-lg-weight-grid');
+            for (const item of DIFFICULTIES.slice(1)) {
+                const row = document.createElement('label');
+                row.className = 'tdk-lg-weight-item';
+                row.style.color = item.color;
+                row.innerHTML = `<span>${escapeHtml(item.name)}</span>`;
+
+                const input = document.createElement('input');
+                input.type = 'number';
+                input.min = '0';
+                input.max = '50';
+                input.step = '1';
+                input.dataset.diff = String(item.id);
+                input.value = settings.random.setWeights[item.id] ?? 0;
+                input.addEventListener('change', () => {
+                    settings.random.setWeights[item.id] = Math.floor(clamp(input.value, 0, 50));
+                    input.value = settings.random.setWeights[item.id];
+                    saveSettings({ refreshSettings: false, chart: false, color: false });
+                });
+
+                row.appendChild(input);
+                weightGrid.appendChild(row);
             }
 
             const allow = panel.querySelector('#tdk-lg-allow-ac');
@@ -2545,16 +2714,25 @@
                 saveSettings({ refreshSettings: false, chart: false, color: false });
             };
 
+            const total = panel.querySelector('#tdk-lg-set-total');
+            total.onchange = () => {
+                settings.random.setTotal = Math.floor(clamp(total.value, 1, 50));
+                total.value = settings.random.setTotal;
+                saveSettings({ refreshSettings: false, chart: false, color: false });
+            };
+
             this.setActiveDifficulty(settings.random.difficulty);
             this.renderBlacklistPanel();
+            this.renderProblemSetResult();
         },
 
         setActiveDifficulty(diff) {
             settings.random.difficulty = String(diff || '3');
+            const pool = new Set(RandomModule.getDifficultyPool());
 
             document.querySelectorAll('.tdk-lg-diff-btn').forEach(btn => {
                 const cur = Number(btn.dataset.diff);
-                const active = btn.dataset.diff === settings.random.difficulty;
+                const active = pool.has(btn.dataset.diff);
 
                 btn.classList.toggle('active', active);
 
@@ -2594,6 +2772,7 @@
             };
 
             toggle('[data-action="random"], [data-action="refresh-pages"], [data-action="black-current"], [data-action="toggle-blacklist"], [data-action="clear-blacklist"], #tdk-lg-allow-ac, .tdk-lg-diff-btn, #tdk-lg-mini-diff, #tdk-lg-mini-black', settings.modules.random);
+            toggle('[data-action="build-problem-set"], [data-action="copy-problem-set"], [data-action="open-training-page"], [data-action="open-contest-page"], #tdk-lg-set-total, #tdk-lg-weight-grid input', settings.modules.random);
             toggle('[data-action="rerender-color"], [data-action="clear-diff-cache"]', settings.modules.color);
             toggle('[data-action="rerender-chart"], #tdk-lg-chart-recent', settings.modules.chart);
 
@@ -2637,6 +2816,62 @@
                 item.appendChild(removeBtn);
                 panel.appendChild(item);
             });
+        },
+
+        formatProblemSetText(data = this.lastProblemSet) {
+            if (!data || !Array.isArray(data.problems)) return '';
+            return data.problems.map(item => item.pid).join('\n');
+        },
+
+        renderProblemSetResult() {
+            const panel = document.getElementById('tdk-lg-set-result');
+            if (!panel) return;
+
+            const data = this.lastProblemSet;
+            if (!data || !Array.isArray(data.problems) || !data.problems.length) {
+                panel.classList.remove('show');
+                panel.innerHTML = '';
+                return;
+            }
+
+            const grouped = new Map();
+            for (const item of data.problems) {
+                if (!grouped.has(item.diff)) grouped.set(item.diff, []);
+                grouped.get(item.diff).push(item.pid);
+            }
+
+            const summary = Array.from(grouped.entries())
+                .sort((a, b) => a[0] - b[0])
+                .map(([diff, pids]) => {
+                    const name = DIFFICULTIES.find(x => x.id === Number(diff))?.name || `难度 ${diff}`;
+                    return `${escapeHtml(name)}：${pids.map(escapeHtml).join('、')}`;
+                })
+                .join('<br>');
+
+            panel.classList.add('show');
+            panel.innerHTML = `
+<div>已生成 ${data.problems.length} 道题，可复制到题单或个人邀请赛。</div>
+<div style="margin-top:6px;">${summary}</div>
+<textarea readonly>${escapeHtml(this.formatProblemSetText(data))}</textarea>
+            `;
+        },
+
+        async copyText(text) {
+            if (!text) throw new Error('没有可复制内容');
+
+            if (navigator.clipboard && window.isSecureContext) {
+                await navigator.clipboard.writeText(text);
+                return;
+            }
+
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.style.position = 'fixed';
+            textarea.style.left = '-9999px';
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            textarea.remove();
         },
 
         renderColorPanel() {
@@ -2781,6 +3016,9 @@
             }
 
             setByPath(settings, path, value);
+            if (path === 'random.difficulty') {
+                settings.random.difficultyPool = [String(value)];
+            }
             saveSettings(this.getSettingSaveOptions(path));
 
             if (type === 'number') input.value = getByPath(settings, path);
@@ -2823,7 +3061,12 @@
             this.setBusy(true);
 
             try {
-                await RandomModule.refreshMaxPage(settings.random.difficulty);
+                const pool = RandomModule.getDifficultyPool();
+                for (let i = 0; i < pool.length; i++) {
+                    this.setStatus(`正在刷新难度池页数：${i + 1}/${pool.length}，难度 ${pool[i]}`);
+                    await RandomModule.refreshMaxPage(pool[i]);
+                }
+                this.setStatus(`已刷新 ${pool.length} 个难度的页数缓存`);
             } catch (err) {
                 console.error(err);
                 this.setStatus(err.message || String(err));
@@ -2831,6 +3074,38 @@
             } finally {
                 this.setBusy(false);
             }
+        },
+
+        async buildProblemSet() {
+            this.setBusy(true);
+
+            try {
+                const data = await RandomModule.buildProblemSet(settings.random.setTotal, settings.random.allowAC);
+                this.lastProblemSet = data;
+                this.renderProblemSetResult();
+                this.setStatus(`已生成 ${data.problems.length} 道题，按权重分布完成`);
+            } catch (err) {
+                console.error(err);
+                this.setStatus(err.message || String(err));
+                alert(err.message || String(err));
+            } finally {
+                this.setBusy(false);
+            }
+        },
+
+        async copyProblemSet() {
+            try {
+                await this.copyText(this.formatProblemSetText());
+                this.setStatus('已复制组题题号列表');
+            } catch (err) {
+                this.setStatus(err.message || String(err));
+                alert(err.message || String(err));
+            }
+        },
+
+        openLuoguPage(url, message) {
+            window.open(url, '_blank', 'noopener,noreferrer');
+            this.setStatus(message);
         },
 
         bindEvents(box) {
@@ -2879,6 +3154,10 @@
                     ChartModule.render(true);
                     this.setStatus('已触发统计图刷新');
                 }
+                if (action === 'build-problem-set') this.buildProblemSet();
+                if (action === 'copy-problem-set') this.copyProblemSet();
+                if (action === 'open-training-page') this.openLuoguPage(BASE + '/training/list', '已打开题单页，可新建题单并粘贴题号');
+                if (action === 'open-contest-page') this.openLuoguPage(BASE + '/contest/list', '已打开比赛页，可创建个人邀请赛并粘贴题号');
             });
 
             box.addEventListener('change', e => {
@@ -3039,17 +3318,24 @@
         },
 
         getCurrentDiffName() {
-            const diff = String(settings.random.difficulty || '3');
+            const pool = RandomModule.getDifficultyPool();
+            if (pool.length > 1) return `难度池 x${pool.length}`;
+
+            const diff = pool[0] || String(settings.random.difficulty || '3');
             return DIFFICULTIES.find(x => String(x.id) === diff)?.name || '未知难度';
         },
 
         updateMiniPanel() {
-            const diff = String(settings.random.difficulty || '3');
+            const pool = RandomModule.getDifficultyPool();
+            const diff = pool.length === 1 ? pool[0] : String(settings.random.difficulty || pool[0] || '3');
             const btn = document.getElementById('tdk-lg-mini-diff');
             if (!btn) return;
 
             btn.textContent = this.getCurrentDiffName();
             btn.style.background = COLOR[Number(diff)] || '#3498db';
+            btn.title = pool.length > 1
+                ? '点击从难度池随机：' + pool.map(item => DIFFICULTIES.find(x => String(x.id) === item)?.name || item).join('、')
+                : '点击继续随机当前难度';
         },
 
         setStatus(msg) {
