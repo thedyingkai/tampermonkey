@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         洛谷工具箱（随机题 / 难度染色 / 难度统计）
 // @namespace    https://github.com/thedyingkai/tampermonkey
-// @version      3.1.1
+// @version      3.2.0
 // @description  合并洛谷随机题、难度染色、练习难度统计；统一可扩展设置界面；全部 fetch 请求统一限制为最多 2 次/秒
 // @author       thedyingkai
 // @match        https://www.luogu.com.cn/*
@@ -324,6 +324,21 @@
     function currentProblemId() {
         const match = location.pathname.match(/^\/problem\/([^/?#]+)$/i);
         return match ? decodeURIComponent(match[1]) : null;
+    }
+
+    function isSetBuilderRoute() {
+        try {
+            const url = new URL(location.href);
+            return url.searchParams.get('tdk_tool') === 'set_builder' || url.hash === '#tdk-set-builder';
+        } catch (_) {
+            return false;
+        }
+    }
+
+    function buildSetBuilderUrl() {
+        const url = new URL(BASE + '/');
+        url.searchParams.set('tdk_tool', 'set_builder');
+        return url.toString();
     }
 
     const RequestQueue = {
@@ -1695,6 +1710,7 @@
         },
 
         shouldRun() {
+            if (isSetBuilderRoute()) return false;
             if (!settings.modules.chart) return false;
             const kind = this.getPageKind();
             if (kind === 'home' && !settings.chart.replaceHomeSlider) return false;
@@ -2587,7 +2603,8 @@
 
         restoreUI(box) {
             const ui = this.getUIState();
-            this.activeTab = ui.activeTab || 'random';
+            const urlTab = new URL(location.href).searchParams.get('tdk_tab');
+            this.activeTab = ['random', 'color', 'chart', 'settings'].includes(urlTab) ? urlTab : (ui.activeTab || 'random');
 
             if (ui.left && ui.top) {
                 box.style.left = ui.left;
@@ -2620,58 +2637,61 @@
             const style = document.createElement('style');
             style.id = 'tdk-lg-toolbox-style';
             style.textContent = `
-#tdk-lg-box { position: fixed; right: 20px; bottom: 20px; z-index: 999999; width: 380px; min-width: 300px; min-height: 260px; max-width: 760px; max-height: 86vh; background: rgba(255,255,255,.96); border: 1px solid rgba(0,0,0,.08); border-radius: 16px; box-shadow: 0 12px 36px rgba(0,0,0,.18); padding: 14px; font-family: "Microsoft YaHei", -apple-system, BlinkMacSystemFont, sans-serif; color: #222; overflow: auto; resize: both; font-size: var(--tdk-font-size, 14px); backdrop-filter: blur(10px); }
+#tdk-lg-nav { position: sticky; top: 0; z-index: 999998; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 7px 12px; border-bottom: 1px solid rgba(0,0,0,.08); background: rgba(255,255,255,.94); box-shadow: 0 2px 12px rgba(0,0,0,.06); backdrop-filter: blur(10px); font-family: "Microsoft YaHei", -apple-system, BlinkMacSystemFont, sans-serif; }
+#tdk-lg-nav .tdk-nav-brand { margin-right: 4px; color: #555; font-size: 13px; font-weight: 900; }
+.tdk-nav-btn { height: 30px; padding: 0 12px; border: 1px solid #dfe5ea; border-radius: 6px; background: #fff; color: #34495e; font-size: 13px; font-weight: 800; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,.04); transition: background .12s ease, border-color .12s ease, color .12s ease, box-shadow .12s ease; }
+.tdk-nav-btn:hover { border-color: #3498db; color: #2485c7; box-shadow: 0 2px 8px rgba(52,152,219,.14); }
+.tdk-nav-btn.primary { border-color: #3498db; background: #3498db; color: #fff; }
+#tdk-lg-box { position: fixed; right: 20px; bottom: 20px; z-index: 999999; width: 380px; min-width: 300px; min-height: 260px; max-width: 760px; max-height: 86vh; background: rgba(255,255,255,.96); border: 1px solid rgba(0,0,0,.08); border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,.18); padding: 14px; font-family: "Microsoft YaHei", -apple-system, BlinkMacSystemFont, sans-serif; color: #222; overflow: auto; resize: both; font-size: var(--tdk-font-size, 14px); backdrop-filter: blur(10px); }
 #tdk-lg-box * { box-sizing: border-box; }
 #tdk-lg-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; cursor: move; user-select: none; }
 #tdk-lg-title { font-size: 1.18em; font-weight: 900; line-height: 1.2; }
 #tdk-lg-tools { display: flex; gap: 6px; flex-shrink: 0; }
-.tdk-lg-mini-btn { width: 31px; height: 28px; border: none; border-radius: 9px; background: #f2f3f5; color: #333; font-size: .88em; font-weight: 800; cursor: pointer; }
-.tdk-lg-mini-btn:hover { background: #e4e6eb; }
+.tdk-lg-mini-btn { width: 31px; height: 28px; border: 1px solid #dfe5ea; border-radius: 6px; background: #fff; color: #34495e; font-size: .88em; font-weight: 800; cursor: pointer; }
+.tdk-lg-mini-btn:hover { border-color: #cbd5df; background: #f4f7fa; }
 #tdk-lg-tabs { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 6px; margin-bottom: 10px; }
-.tdk-lg-tab { height: 31px; border: 1px solid rgba(0,0,0,.08); border-radius: 10px; background: #f8f9fb; color: #444; font-weight: 800; cursor: pointer; }
+.tdk-lg-tab { height: 31px; border: 1px solid #dfe5ea; border-radius: 6px; background: #fff; color: #444; font-weight: 800; cursor: pointer; }
 .tdk-lg-tab.active { background: #3498db; color: #fff; border-color: #3498db; }
 .tdk-lg-panel { display: none; }
 .tdk-lg-panel.active { display: block; }
 .tdk-lg-desc { color: #777; font-size: .9em; line-height: 1.5; margin: 0 0 10px 0; }
 #tdk-lg-diff-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin-bottom: 10px; }
-.tdk-lg-diff-btn { min-height: 34px; border-radius: 10px; border: 1px solid rgba(0,0,0,.08); background: #f8f9fb; font-weight: 800; cursor: pointer; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding: 0 8px; transition: transform .12s ease, box-shadow .12s ease, background .12s ease; }
-.tdk-lg-diff-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,.10); }
-.tdk-lg-diff-btn.active { color: #fff!important; box-shadow: 0 6px 16px rgba(0,0,0,.18); }
-.tdk-lg-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 8px 0 10px; padding: 8px 10px; border-radius: 12px; background: #f7f8fa; }
+.tdk-lg-diff-btn { min-height: 34px; border-radius: 6px; border: 1px solid #dfe5ea; background: #fff; font-weight: 800; cursor: pointer; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding: 0 8px; transition: box-shadow .12s ease, background .12s ease, border-color .12s ease; }
+.tdk-lg-diff-btn:hover { box-shadow: 0 2px 9px rgba(0,0,0,.08); }
+.tdk-lg-diff-btn.active { color: #fff!important; box-shadow: 0 3px 10px rgba(0,0,0,.16); }
+.tdk-lg-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 8px 0 10px; padding: 8px 10px; border-radius: 6px; background: #f7f8fa; }
 .tdk-lg-row label { font-size: .94em; font-weight: 650; cursor: pointer; user-select: none; }
 .tdk-lg-switch { width: 42px; height: 22px; appearance: none; border-radius: 999px; background: #c9ced6; position: relative; cursor: pointer; outline: none; transition: background .15s ease; }
 .tdk-lg-switch:before { content: ""; position: absolute; width: 18px; height: 18px; left: 2px; top: 2px; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.25); transition: transform .15s ease; }
 .tdk-lg-switch:checked { background: #3498db; }
 .tdk-lg-switch:checked:before { transform: translateX(20px); }
 .tdk-lg-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.tdk-lg-btn { height: 36px; border: none; border-radius: 11px; color: #fff; background: #3498db; font-weight: 800; cursor: pointer; transition: opacity .12s ease, transform .12s ease; font-size: 1em; }
-.tdk-lg-btn:hover { opacity: .88; transform: translateY(-1px); }
+.tdk-lg-btn { height: 36px; border: 1px solid #d4dde5; border-radius: 6px; color: #34495e; background: #fff; font-weight: 800; cursor: pointer; transition: background .12s ease, border-color .12s ease, color .12s ease, box-shadow .12s ease; font-size: 1em; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+.tdk-lg-btn:hover { border-color: #3498db; color: #2485c7; box-shadow: 0 2px 8px rgba(52,152,219,.14); }
 .tdk-lg-btn:disabled { opacity: .55; cursor: not-allowed; transform: none; }
 .tdk-lg-diff-btn:disabled, .tdk-lg-switch:disabled, #tdk-lg-mini-diff:disabled, #tdk-lg-mini-black:disabled { opacity: .55; cursor: not-allowed; transform: none; }
-.tdk-lg-btn.main { grid-column: span 2; height: 40px; font-size: 1.05em; }
-.tdk-lg-btn.orange { background: #e67e22; }
-.tdk-lg-btn.red { background: #c0392b; }
-.tdk-lg-btn.purple { background: #8e44ad; }
-.tdk-lg-btn.gray { background: #6c757d; }
-#tdk-lg-status { margin-top: 10px; padding: 8px 10px; border-radius: 10px; background: #f7f8fa; color: #666; font-size: .86em; line-height: 1.45; word-break: break-word; }
+.tdk-lg-btn.main { grid-column: span 2; height: 40px; font-size: 1.05em; border-color: #3498db; background: #3498db; color: #fff; }
+.tdk-lg-btn.main:hover { background: #2485c7; color: #fff; }
+.tdk-lg-btn.orange { border-color: #f0b37a; color: #b86113; }
+.tdk-lg-btn.red { border-color: #e7afa8; color: #b53228; }
+.tdk-lg-btn.purple { border-color: #c8afe0; color: #74439b; }
+.tdk-lg-btn.gray { color: #57606a; }
+#tdk-lg-status { margin-top: 10px; padding: 8px 10px; border-radius: 6px; background: #f7f8fa; color: #666; font-size: .86em; line-height: 1.45; word-break: break-word; }
 #tdk-lg-request { margin-top: 7px; color: #999; font-size: .82em; }
-#tdk-lg-blacklist { display: none; margin-top: 10px; padding: 8px; border-radius: 12px; background: #f7f8fa; max-height: 160px; overflow: auto; }
+#tdk-lg-blacklist { display: none; margin-top: 10px; padding: 8px; border-radius: 6px; background: #f7f8fa; max-height: 160px; overflow: auto; }
 #tdk-lg-blacklist.show { display: block; }
-.tdk-lg-black-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px; border-radius: 9px; background: #fff; margin-bottom: 6px; box-shadow: 0 1px 4px rgba(0,0,0,.05); }
+.tdk-lg-black-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px; border-radius: 6px; background: #fff; margin-bottom: 6px; box-shadow: 0 1px 4px rgba(0,0,0,.05); }
 .tdk-lg-black-item a { color: #3498db; font-weight: 800; text-decoration: none; }
-.tdk-lg-black-item button { width: 48px; height: 26px; border: none; border-radius: 8px; background: #e74c3c; color: #fff; font-weight: 800; cursor: pointer; }
+.tdk-lg-black-item button { width: 48px; height: 26px; border: 1px solid #e7afa8; border-radius: 6px; background: #fff; color: #b53228; font-weight: 800; cursor: pointer; }
 .tdk-lg-section-title { margin: 12px 0 8px; font-weight: 900; color: #444; }
-.tdk-lg-weight-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin-bottom: 10px; }
-.tdk-lg-weight-item { display: grid; grid-template-columns: 1fr 54px; align-items: center; gap: 6px; padding: 7px 8px; border-radius: 10px; background: #f7f8fa; font-weight: 750; }
-.tdk-lg-weight-item input { width: 54px; height: 28px; border: 1px solid #ddd; border-radius: 8px; padding: 2px 5px; text-align: center; background: #fff; }
-.tdk-lg-result { display: none; margin-top: 10px; padding: 9px 10px; border-radius: 12px; background: #f7f8fa; color: #555; font-size: .88em; line-height: 1.55; word-break: break-word; }
+.tdk-lg-result { display: none; margin-top: 10px; padding: 9px 10px; border-radius: 6px; background: #f7f8fa; color: #555; font-size: .88em; line-height: 1.55; word-break: break-word; }
 .tdk-lg-result.show { display: block; }
-.tdk-lg-result textarea { width: 100%; min-height: 72px; margin-top: 6px; resize: vertical; border: 1px solid #ddd; border-radius: 8px; padding: 7px; font-family: Consolas, monospace; font-size: .95em; }
-.tdk-setting-section { margin: 8px 0 12px; padding: 10px; border-radius: 12px; background: #f7f8fa; }
+.tdk-lg-result textarea { width: 100%; min-height: 72px; margin-top: 6px; resize: vertical; border: 1px solid #ddd; border-radius: 6px; padding: 7px; font-family: Consolas, monospace; font-size: .95em; }
+.tdk-setting-section { margin: 8px 0 12px; padding: 10px; border-radius: 6px; background: #f7f8fa; }
 .tdk-setting-section h4 { margin: 0 0 8px; font-size: .98em; }
 .tdk-setting-item { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; padding: 6px 0; color: #555; }
 .tdk-setting-item + .tdk-setting-item { border-top: 1px solid rgba(0,0,0,.06); }
-.tdk-setting-item input[type="number"], .tdk-setting-item select { width: 100px; height: 28px; border: 1px solid #ddd; border-radius: 8px; padding: 2px 6px; background: #fff; }
+.tdk-setting-item input[type="number"], .tdk-setting-item select { width: 100px; height: 28px; border: 1px solid #ddd; border-radius: 6px; padding: 2px 6px; background: #fff; }
 .tdk-setting-help { margin-top: 8px; color: #999; font-size: .82em; line-height: 1.5; }
 #tdk-lg-resize-hint { position: absolute; right: 7px; bottom: 4px; color: #aaa; font-size: 12px; pointer-events: none; }
 #tdk-lg-mini-panel { display: none; align-items: center; gap: 6px; }
@@ -2682,6 +2702,38 @@
 #tdk-lg-box.tdk-minimized { width: auto!important; min-width: 0!important; min-height: 0!important; height: auto!important; resize: none!important; overflow: visible!important; padding: 8px 10px; border-radius: 999px; cursor: move; }
 #tdk-lg-box.tdk-minimized #tdk-lg-full-panel { display: none; }
 #tdk-lg-box.tdk-minimized #tdk-lg-mini-panel { display: flex; }
+#tdk-set-builder-page { min-height: calc(100vh - 46px); padding: 24px 18px 56px; background: #f4f7fa; font-family: "Microsoft YaHei", -apple-system, BlinkMacSystemFont, sans-serif; color: #1f2d3d; }
+#tdk-set-builder-page * { box-sizing: border-box; }
+.tdk-set-shell { width: min(1120px, 100%); margin: 0 auto; }
+.tdk-set-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.tdk-set-head h1 { margin: 0 0 6px; font-size: 24px; line-height: 1.25; color: #1f2d3d; }
+.tdk-set-subtitle { margin: 0; color: #667788; font-size: 14px; }
+.tdk-set-layout { display: grid; grid-template-columns: minmax(280px, 380px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.tdk-set-panel { border: 1px solid #dfe5ea; border-radius: 8px; background: #fff; box-shadow: 0 4px 18px rgba(31,45,61,.07); }
+.tdk-set-panel h2 { margin: 0; padding: 14px 16px; border-bottom: 1px solid #edf1f5; font-size: 16px; color: #1f2d3d; }
+.tdk-set-panel-body { padding: 14px 16px 16px; }
+.tdk-set-field { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; margin-bottom: 12px; color: #4a5b6a; font-weight: 700; }
+.tdk-set-field input[type="number"] { width: 88px; height: 32px; border: 1px solid #d4dde5; border-radius: 6px; padding: 2px 8px; background: #fff; color: #1f2d3d; }
+.tdk-set-weight-grid { display: grid; gap: 8px; }
+.tdk-set-weight-item { display: grid; grid-template-columns: 1fr 62px; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid #edf1f5; border-radius: 6px; background: #fbfcfd; font-weight: 800; }
+.tdk-set-weight-item input { width: 62px; height: 30px; border: 1px solid #d4dde5; border-radius: 6px; padding: 2px 6px; text-align: center; }
+.tdk-set-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.tdk-set-btn { height: 34px; padding: 0 14px; border: 1px solid #d4dde5; border-radius: 6px; background: #fff; color: #34495e; font-weight: 800; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+.tdk-set-btn:hover { border-color: #3498db; color: #2485c7; box-shadow: 0 2px 8px rgba(52,152,219,.14); }
+.tdk-set-btn.primary { border-color: #3498db; background: #3498db; color: #fff; }
+.tdk-set-btn.primary:hover { background: #2485c7; color: #fff; }
+.tdk-set-btn:disabled { opacity: .55; cursor: not-allowed; box-shadow: none; }
+.tdk-set-result-empty { padding: 40px 16px; color: #8a98a8; text-align: center; }
+.tdk-set-summary { padding: 0 0 12px; color: #4a5b6a; line-height: 1.65; }
+.tdk-set-result textarea { width: 100%; min-height: 260px; resize: vertical; border: 1px solid #d4dde5; border-radius: 6px; padding: 10px; font-family: Consolas, monospace; font-size: 14px; line-height: 1.5; color: #1f2d3d; }
+.tdk-set-status { margin-top: 12px; padding: 9px 11px; border-radius: 6px; background: #f7f8fa; color: #667788; font-size: 13px; line-height: 1.5; word-break: break-word; }
+@media (max-width: 760px) {
+    #tdk-lg-nav { justify-content: flex-start; overflow-x: auto; }
+    #tdk-lg-nav .tdk-nav-brand { flex: 0 0 auto; }
+    .tdk-nav-btn { flex: 0 0 auto; }
+    .tdk-set-layout { grid-template-columns: 1fr; }
+    .tdk-set-head { display: block; }
+}
             `;
 
             document.head.appendChild(style);
@@ -2691,6 +2743,12 @@
             if (document.getElementById('tdk-lg-box')) return;
 
             this.injectStyle();
+            this.createNav();
+
+            if (isSetBuilderRoute()) {
+                this.renderSetBuilderPage();
+                return;
+            }
 
             const box = document.createElement('div');
             box.id = 'tdk-lg-box';
@@ -2758,6 +2816,63 @@
             if (this.getUIState().minimized === true) this.setMinimized(true);
         },
 
+        createNav() {
+            if (document.getElementById('tdk-lg-nav')) return;
+
+            const nav = document.createElement('div');
+            nav.id = 'tdk-lg-nav';
+            nav.innerHTML = `
+<span class="tdk-nav-brand">洛谷工具箱</span>
+<button class="tdk-nav-btn primary" data-action="nav-random">随机题</button>
+<button class="tdk-nav-btn" data-action="open-set-builder">组题</button>
+<button class="tdk-nav-btn" data-action="nav-color">染色</button>
+<button class="tdk-nav-btn" data-action="nav-chart">统计</button>
+<button class="tdk-nav-btn" data-action="nav-settings">设置</button>
+            `;
+
+            const app = document.getElementById('app') || document.body.firstElementChild;
+            if (document.body) {
+                if (app && app.parentElement === document.body) app.before(nav);
+                else document.body.prepend(nav);
+            }
+
+            nav.addEventListener('click', e => {
+                const action = e.target.closest('[data-action]')?.dataset.action;
+                if (!action) return;
+
+                if (action === 'open-set-builder') {
+                    location.href = buildSetBuilderUrl();
+                    return;
+                }
+
+                if (isSetBuilderRoute()) {
+                    const target = {
+                        'nav-random': 'random',
+                        'nav-color': 'color',
+                        'nav-chart': 'chart',
+                        'nav-settings': 'settings',
+                    }[action] || 'random';
+                    const url = new URL(BASE + '/');
+                    url.searchParams.set('tdk_tab', target);
+                    location.href = url.toString();
+                    return;
+                }
+
+                if (action === 'nav-random') this.openToolboxTab('random');
+                if (action === 'nav-color') this.openToolboxTab('color');
+                if (action === 'nav-chart') this.openToolboxTab('chart');
+                if (action === 'nav-settings') this.openToolboxTab('settings');
+            });
+        },
+
+        openToolboxTab(tab) {
+            const box = document.getElementById('tdk-lg-box');
+            if (!box) return;
+
+            this.setMinimized(false);
+            this.switchTab(tab);
+        },
+
         renderPanels() {
             this.renderRandomPanel();
             this.renderColorPanel();
@@ -2779,24 +2894,12 @@
 <div class="tdk-lg-actions">
     <button class="tdk-lg-btn main" data-action="random">随机一道题</button>
     <button class="tdk-lg-btn orange" data-action="refresh-pages">刷新难度池页数</button>
+    <button class="tdk-lg-btn" data-action="open-set-builder">打开组题页</button>
     <button class="tdk-lg-btn red" data-action="black-current">拉黑当前</button>
     <button class="tdk-lg-btn purple" data-action="toggle-blacklist">拉黑列表</button>
     <button class="tdk-lg-btn gray" data-action="clear-blacklist">清空拉黑</button>
 </div>
 <div id="tdk-lg-blacklist"></div>
-<div class="tdk-lg-section-title">按权重组题</div>
-<div class="tdk-lg-row">
-    <label for="tdk-lg-set-total">总题数</label>
-    <input id="tdk-lg-set-total" type="number" min="1" max="50" value="${settings.random.setTotal}" style="width:84px;height:28px;border:1px solid #ddd;border-radius:8px;padding:2px 6px;">
-</div>
-<div id="tdk-lg-weight-grid" class="tdk-lg-weight-grid"></div>
-<div class="tdk-lg-actions">
-    <button class="tdk-lg-btn main" data-action="build-problem-set">生成题号列表</button>
-    <button class="tdk-lg-btn orange" data-action="copy-problem-set">复制题号</button>
-    <button class="tdk-lg-btn purple" data-action="open-training-page">打开题单页</button>
-    <button class="tdk-lg-btn gray" data-action="open-contest-page">打开比赛页</button>
-</div>
-<div id="tdk-lg-set-result" class="tdk-lg-result"></div>
             `;
 
             const grid = panel.querySelector('#tdk-lg-diff-grid');
@@ -2819,30 +2922,6 @@
                 grid.appendChild(btn);
             }
 
-            const weightGrid = panel.querySelector('#tdk-lg-weight-grid');
-            for (const item of DIFFICULTIES.slice(1)) {
-                const row = document.createElement('label');
-                row.className = 'tdk-lg-weight-item';
-                row.style.color = item.color;
-                row.innerHTML = `<span>${escapeHtml(item.name)}</span>`;
-
-                const input = document.createElement('input');
-                input.type = 'number';
-                input.min = '0';
-                input.max = '50';
-                input.step = '1';
-                input.dataset.diff = String(item.id);
-                input.value = settings.random.setWeights[item.id] ?? 0;
-                input.addEventListener('change', () => {
-                    settings.random.setWeights[item.id] = Math.floor(clamp(input.value, 0, 50));
-                    input.value = settings.random.setWeights[item.id];
-                    saveSettings({ refreshSettings: false, chart: false, color: false });
-                });
-
-                row.appendChild(input);
-                weightGrid.appendChild(row);
-            }
-
             const allow = panel.querySelector('#tdk-lg-allow-ac');
             allow.checked = !!settings.random.allowAC;
             allow.onchange = () => {
@@ -2850,16 +2929,8 @@
                 saveSettings({ refreshSettings: false, chart: false, color: false });
             };
 
-            const total = panel.querySelector('#tdk-lg-set-total');
-            total.onchange = () => {
-                settings.random.setTotal = Math.floor(clamp(total.value, 1, 50));
-                total.value = settings.random.setTotal;
-                saveSettings({ refreshSettings: false, chart: false, color: false });
-            };
-
             this.setActiveDifficulty(settings.random.difficulty);
             this.renderBlacklistPanel();
-            this.renderProblemSetResult();
         },
 
         setActiveDifficulty(diff) {
@@ -2899,18 +2970,24 @@
 
         applyModuleState() {
             const box = document.getElementById('tdk-lg-box');
-            if (!box) return;
+            const setPage = document.getElementById('tdk-set-builder-page');
 
-            const toggle = (selector, enabled) => {
-                box.querySelectorAll(selector).forEach(el => {
+            const toggle = (root, selector, enabled) => {
+                if (!root) return;
+                root.querySelectorAll(selector).forEach(el => {
                     el.disabled = !enabled;
                 });
             };
 
-            toggle('[data-action="random"], [data-action="refresh-pages"], [data-action="black-current"], [data-action="toggle-blacklist"], [data-action="clear-blacklist"], #tdk-lg-allow-ac, .tdk-lg-diff-btn, #tdk-lg-mini-diff, #tdk-lg-mini-black', settings.modules.random);
-            toggle('[data-action="build-problem-set"], [data-action="copy-problem-set"], [data-action="open-training-page"], [data-action="open-contest-page"], #tdk-lg-set-total, #tdk-lg-weight-grid input', settings.modules.random);
-            toggle('[data-action="rerender-color"], [data-action="clear-diff-cache"]', settings.modules.color);
-            toggle('[data-action="rerender-chart"], #tdk-lg-chart-recent', settings.modules.chart);
+            toggle(box, '[data-action="random"], [data-action="refresh-pages"], [data-action="black-current"], [data-action="toggle-blacklist"], [data-action="clear-blacklist"], [data-action="open-set-builder"], #tdk-lg-allow-ac, .tdk-lg-diff-btn, #tdk-lg-mini-diff, #tdk-lg-mini-black', settings.modules.random);
+            toggle(box, '[data-action="rerender-color"], [data-action="clear-diff-cache"]', settings.modules.color);
+            toggle(box, '[data-action="rerender-chart"], #tdk-lg-chart-recent', settings.modules.chart);
+            toggle(setPage, '[data-action="build-problem-set"], [data-action="copy-problem-set"], [data-action="refresh-pages"], [data-action="open-training-page"], [data-action="open-contest-page"], #tdk-set-total, #tdk-set-allow-ac, #tdk-set-weight-grid input', settings.modules.random);
+
+            if (!box) {
+                if (!settings.modules.chart) ChartModule.removeOld();
+                return;
+            }
 
             box.classList.toggle('tdk-random-disabled', !settings.modules.random);
             box.classList.toggle('tdk-color-disabled', !settings.modules.color);
@@ -2954,19 +3031,131 @@
             });
         },
 
+        renderSetBuilderPage() {
+            document.title = '组题 - 洛谷工具箱';
+            document.getElementById('tdk-lg-box')?.remove();
+            ChartModule.removeOld();
+            document.querySelectorAll('#app, #app-old').forEach(node => {
+                node.style.display = 'none';
+            });
+
+            let page = document.getElementById('tdk-set-builder-page');
+            if (!page) {
+                page = document.createElement('main');
+                page.id = 'tdk-set-builder-page';
+                document.body.appendChild(page);
+            }
+
+            page.innerHTML = `
+<div class="tdk-set-shell">
+    <div class="tdk-set-head">
+        <div>
+            <h1>按权重组题</h1>
+            <p class="tdk-set-subtitle">为题单或个人邀请赛生成题号列表，随机请求仍走全局限速。</p>
+        </div>
+        <div class="tdk-set-actions">
+            <button class="tdk-set-btn" data-action="nav-random">返回工具箱</button>
+            <button class="tdk-set-btn" data-action="open-training-page">题单页</button>
+            <button class="tdk-set-btn" data-action="open-contest-page">比赛页</button>
+        </div>
+    </div>
+    <div class="tdk-set-layout">
+        <section class="tdk-set-panel">
+            <h2>组题参数</h2>
+            <div class="tdk-set-panel-body">
+                <label class="tdk-set-field">
+                    <span>总题数</span>
+                    <input id="tdk-set-total" type="number" min="1" max="50" step="1" value="${settings.random.setTotal}">
+                </label>
+                <label class="tdk-set-field">
+                    <span>允许已 AC 题</span>
+                    <input id="tdk-set-allow-ac" class="tdk-lg-switch" type="checkbox">
+                </label>
+                <div id="tdk-set-weight-grid" class="tdk-set-weight-grid"></div>
+                <div class="tdk-set-actions">
+                    <button class="tdk-set-btn primary" data-action="build-problem-set">生成题号列表</button>
+                    <button class="tdk-set-btn" data-action="copy-problem-set">复制题号</button>
+                    <button class="tdk-set-btn" data-action="refresh-pages">刷新页数缓存</button>
+                </div>
+                <div id="tdk-set-status" class="tdk-set-status">准备就绪</div>
+            </div>
+        </section>
+        <section class="tdk-set-panel">
+            <h2>生成结果</h2>
+            <div id="tdk-set-result" class="tdk-set-panel-body tdk-set-result"></div>
+        </section>
+    </div>
+</div>
+            `;
+
+            const allow = page.querySelector('#tdk-set-allow-ac');
+            allow.checked = !!settings.random.allowAC;
+            allow.addEventListener('change', () => {
+                settings.random.allowAC = allow.checked;
+                saveSettings({ refreshSettings: false, chart: false, color: false });
+            });
+
+            const total = page.querySelector('#tdk-set-total');
+            total.addEventListener('change', () => {
+                settings.random.setTotal = Math.floor(clamp(total.value, 1, 50));
+                total.value = settings.random.setTotal;
+                saveSettings({ refreshSettings: false, chart: false, color: false });
+            });
+
+            const weightGrid = page.querySelector('#tdk-set-weight-grid');
+            for (const item of DIFFICULTIES.slice(1)) {
+                const row = document.createElement('label');
+                row.className = 'tdk-set-weight-item';
+                row.style.color = item.color;
+                row.innerHTML = `<span>${escapeHtml(item.name)}</span>`;
+
+                const input = document.createElement('input');
+                input.type = 'number';
+                input.min = '0';
+                input.max = '50';
+                input.step = '1';
+                input.dataset.diff = String(item.id);
+                input.value = settings.random.setWeights[item.id] ?? 0;
+                input.addEventListener('change', () => {
+                    settings.random.setWeights[item.id] = Math.floor(clamp(input.value, 0, 50));
+                    input.value = settings.random.setWeights[item.id];
+                    saveSettings({ refreshSettings: false, chart: false, color: false });
+                });
+
+                row.appendChild(input);
+                weightGrid.appendChild(row);
+            }
+
+            page.onclick = e => {
+                const action = e.target.closest('[data-action]')?.dataset.action;
+                if (!action) return;
+
+                if (action === 'build-problem-set') this.buildProblemSet();
+                if (action === 'copy-problem-set') this.copyProblemSet();
+                if (action === 'refresh-pages') this.refreshCurrentDifficulty();
+                if (action === 'open-training-page') this.openLuoguPage(BASE + '/training/list', '已打开题单页，可新建题单并粘贴题号');
+                if (action === 'open-contest-page') this.openLuoguPage(BASE + '/contest/list', '已打开比赛页，可创建个人邀请赛并粘贴题号');
+                if (action === 'nav-random') location.href = BASE + '/';
+            };
+
+            this.renderProblemSetResult();
+            this.updateRequestBadge();
+            this.applyModuleState();
+        },
+
         formatProblemSetText(data = this.lastProblemSet) {
             if (!data || !Array.isArray(data.problems)) return '';
             return data.problems.map(item => item.pid).join('\n');
         },
 
         renderProblemSetResult() {
-            const panel = document.getElementById('tdk-lg-set-result');
+            const panel = document.getElementById('tdk-set-result') || document.getElementById('tdk-lg-set-result');
             if (!panel) return;
 
             const data = this.lastProblemSet;
             if (!data || !Array.isArray(data.problems) || !data.problems.length) {
                 panel.classList.remove('show');
-                panel.innerHTML = '';
+                panel.innerHTML = '<div class="tdk-set-result-empty">还没有生成题号列表</div>';
                 return;
             }
 
@@ -2987,7 +3176,7 @@
             panel.classList.add('show');
             panel.innerHTML = `
 <div>已生成 ${data.problems.length} 道题，可复制到题单或个人邀请赛。</div>
-<div style="margin-top:6px;">${summary}</div>
+<div class="tdk-set-summary" style="margin-top:6px;">${summary}</div>
 <textarea readonly>${escapeHtml(this.formatProblemSetText(data))}</textarea>
             `;
         },
@@ -3175,6 +3364,9 @@
             document.querySelectorAll('#tdk-lg-box .tdk-lg-btn').forEach(btn => {
                 btn.disabled = !!busy;
             });
+            document.querySelectorAll('#tdk-set-builder-page .tdk-set-btn').forEach(btn => {
+                btn.disabled = !!busy;
+            });
 
             if (!busy) this.applyModuleState();
         },
@@ -3263,6 +3455,7 @@
                 }
                 if (action === 'random') this.runRandom();
                 if (action === 'refresh-pages') this.refreshCurrentDifficulty();
+                if (action === 'open-set-builder') location.href = buildSetBuilderUrl();
                 if (action === 'black-current') RandomModule.quickBlacklistCurrent();
                 if (action === 'toggle-blacklist') {
                     document.getElementById('tdk-lg-blacklist')?.classList.toggle('show');
@@ -3477,13 +3670,20 @@
         setStatus(msg) {
             const node = document.getElementById('tdk-lg-status');
             if (node) node.innerText = msg;
+
+            const pageNode = document.getElementById('tdk-set-status');
+            if (pageNode) pageNode.innerText = msg;
         },
 
         updateRequestBadge() {
             const node = document.getElementById('tdk-lg-request');
-            if (!node) return;
+            const text = `请求限速：≤ ${clamp(settings.request.maxPerSecond, 0.2, 2)} 次/秒；排队 ${RequestQueue.queue.length}；进行中 ${RequestQueue.active}；合并 ${RequestQueue.textPending.size}；总请求 ${RequestQueue.total}`;
 
-            node.innerText = `请求限速：≤ ${clamp(settings.request.maxPerSecond, 0.2, 2)} 次/秒；排队 ${RequestQueue.queue.length}；进行中 ${RequestQueue.active}；合并 ${RequestQueue.textPending.size}；总请求 ${RequestQueue.total}`;
+            if (node) node.innerText = text;
+
+            const pageNode = document.getElementById('tdk-set-status');
+            if (pageNode && !RequestQueue.active && !RequestQueue.queue.length) return;
+            if (pageNode) pageNode.innerText = text;
         },
     };
 
@@ -3500,6 +3700,18 @@
             timer = setTimeout(() => {
                 ChartModule.removeOld();
                 ColorModule.practiceAutoDone = false;
+                if (isSetBuilderRoute()) {
+                    Toolbox.renderSetBuilderPage();
+                    return;
+                }
+
+                const page = document.getElementById('tdk-set-builder-page');
+                if (page) page.remove();
+                document.querySelectorAll('#app, #app-old').forEach(node => {
+                    node.style.display = '';
+                });
+
+                Toolbox.createUI();
                 ColorModule.render();
                 ChartModule.render(true);
             }, 500);
