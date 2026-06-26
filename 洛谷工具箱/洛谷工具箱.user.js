@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         洛谷工具箱（随机题 / 难度染色 / 难度统计）
 // @namespace    https://github.com/thedyingkai/tampermonkey
-// @version      3.2.1
+// @version      3.3.0
 // @description  合并洛谷随机题、难度染色、练习难度统计；统一可扩展设置界面；全部 fetch 请求统一限制为最多 2 次/秒
 // @author       thedyingkai
 // @match        https://www.luogu.com.cn/*
@@ -2620,7 +2620,7 @@
         restoreUI(box) {
             const ui = this.getUIState();
             const urlTab = new URL(location.href).searchParams.get('tdk_tab');
-            this.activeTab = ['random', 'color', 'chart', 'settings'].includes(urlTab) ? urlTab : (ui.activeTab || 'random');
+            this.activeTab = ['random', 'more'].includes(urlTab) ? urlTab : (['random', 'more'].includes(ui.activeTab) ? ui.activeTab : 'random');
 
             if (ui.left && ui.top) {
                 box.style.left = ui.left;
@@ -2653,12 +2653,6 @@
             const style = document.createElement('style');
             style.id = 'tdk-lg-toolbox-style';
             style.textContent = `
-#tdk-lg-nav { position: fixed; right: 14px; top: 44px; z-index: 999998; display: flex; align-items: center; gap: 5px; padding: 5px; border: 1px solid rgba(31,45,61,.12); border-radius: 8px; background: rgba(255,255,255,.92); box-shadow: 0 6px 20px rgba(31,45,61,.12); backdrop-filter: blur(10px); font-family: "Microsoft YaHei", -apple-system, BlinkMacSystemFont, sans-serif; }
-#tdk-lg-nav .tdk-nav-brand { display: inline-flex; align-items: center; height: 28px; padding: 0 10px; border-radius: 6px; background: #3498db; color: #fff; font-size: 12px; font-weight: 900; white-space: nowrap; }
-#tdk-lg-nav:not(:hover):not(:focus-within) .tdk-nav-btn { display: none; }
-.tdk-nav-btn { height: 28px; padding: 0 10px; border: 1px solid #dfe5ea; border-radius: 6px; background: #fff; color: #34495e; font-size: 12px; font-weight: 800; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,.04); transition: background .12s ease, border-color .12s ease, color .12s ease, box-shadow .12s ease; white-space: nowrap; }
-.tdk-nav-btn:hover { border-color: #3498db; color: #2485c7; box-shadow: 0 2px 8px rgba(52,152,219,.14); }
-.tdk-nav-btn.primary { border-color: #3498db; background: #3498db; color: #fff; }
 #tdk-lg-box { position: fixed; right: 20px; bottom: 20px; z-index: 999999; width: 380px; min-width: 300px; min-height: 260px; max-width: 760px; max-height: 86vh; background: rgba(255,255,255,.96); border: 1px solid rgba(0,0,0,.08); border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,.18); padding: 14px; font-family: "Microsoft YaHei", -apple-system, BlinkMacSystemFont, sans-serif; color: #222; overflow: auto; resize: both; font-size: var(--tdk-font-size, 14px); backdrop-filter: blur(10px); }
 #tdk-lg-box * { box-sizing: border-box; }
 #tdk-lg-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; cursor: move; user-select: none; }
@@ -2666,7 +2660,7 @@
 #tdk-lg-tools { display: flex; gap: 6px; flex-shrink: 0; }
 .tdk-lg-mini-btn { width: 31px; height: 28px; border: 1px solid #dfe5ea; border-radius: 6px; background: #fff; color: #34495e; font-size: .88em; font-weight: 800; cursor: pointer; }
 .tdk-lg-mini-btn:hover { border-color: #cbd5df; background: #f4f7fa; }
-#tdk-lg-tabs { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 6px; margin-bottom: 10px; }
+#tdk-lg-tabs { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 6px; margin-bottom: 10px; }
 .tdk-lg-tab { height: 31px; border: 1px solid #dfe5ea; border-radius: 6px; background: #fff; color: #444; font-weight: 800; cursor: pointer; }
 .tdk-lg-tab.active { background: #3498db; color: #fff; border-color: #3498db; }
 .tdk-lg-panel { display: none; }
@@ -2701,6 +2695,11 @@
 .tdk-lg-black-item a { color: #3498db; font-weight: 800; text-decoration: none; }
 .tdk-lg-black-item button { width: 48px; height: 26px; border: 1px solid #e7afa8; border-radius: 6px; background: #fff; color: #b53228; font-weight: 800; cursor: pointer; }
 .tdk-lg-section-title { margin: 12px 0 8px; font-weight: 900; color: #444; }
+.tdk-lg-tool-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; margin: 8px 0 10px; }
+.tdk-lg-tool-card { min-height: 58px; padding: 9px 10px; border: 1px solid #dfe5ea; border-radius: 6px; background: #fff; color: #34495e; text-align: left; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+.tdk-lg-tool-card:hover { border-color: #3498db; box-shadow: 0 2px 8px rgba(52,152,219,.14); }
+.tdk-lg-tool-card strong { display: block; margin-bottom: 3px; font-size: .98em; color: #263747; }
+.tdk-lg-tool-card span { display: block; color: #7a8794; font-size: .82em; line-height: 1.35; }
 .tdk-lg-result { display: none; margin-top: 10px; padding: 9px 10px; border-radius: 6px; background: #f7f8fa; color: #555; font-size: .88em; line-height: 1.55; word-break: break-word; }
 .tdk-lg-result.show { display: block; }
 .tdk-lg-result textarea { width: 100%; min-height: 72px; margin-top: 6px; resize: vertical; border: 1px solid #ddd; border-radius: 6px; padding: 7px; font-family: Consolas, monospace; font-size: .95em; }
@@ -2719,20 +2718,20 @@
 #tdk-lg-box.tdk-minimized { width: auto!important; min-width: 0!important; min-height: 0!important; height: auto!important; resize: none!important; overflow: visible!important; padding: 8px 10px; border-radius: 999px; cursor: move; }
 #tdk-lg-box.tdk-minimized #tdk-lg-full-panel { display: none; }
 #tdk-lg-box.tdk-minimized #tdk-lg-mini-panel { display: flex; }
-#tdk-set-builder-page, #tdk-settings-page { min-height: 100vh; padding: 24px 18px 56px; background: #f4f7fa; font-family: "Microsoft YaHei", -apple-system, BlinkMacSystemFont, sans-serif; color: #1f2d3d; }
+#tdk-set-builder-page, #tdk-settings-page { min-height: 100vh; padding: 28px 18px 56px; background: linear-gradient(180deg, #edf6fc 0, #f7f9fb 190px, #f7f9fb 100%); font-family: "Microsoft YaHei", -apple-system, BlinkMacSystemFont, sans-serif; color: #1f2d3d; }
 #tdk-set-builder-page *, #tdk-settings-page * { box-sizing: border-box; }
 .tdk-set-shell { width: min(1120px, 100%); margin: 0 auto; }
-.tdk-set-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.tdk-set-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; padding: 18px 20px; border: 1px solid rgba(52,152,219,.20); border-radius: 10px; background: rgba(255,255,255,.86); box-shadow: 0 10px 28px rgba(31,45,61,.09); }
 .tdk-set-head h1 { margin: 0 0 6px; font-size: 24px; line-height: 1.25; color: #1f2d3d; }
-.tdk-set-subtitle { margin: 0; color: #667788; font-size: 14px; }
-.tdk-set-layout { display: grid; grid-template-columns: minmax(280px, 380px) minmax(0, 1fr); gap: 16px; align-items: start; }
-.tdk-set-panel { border: 1px solid #dfe5ea; border-radius: 8px; background: #fff; box-shadow: 0 4px 18px rgba(31,45,61,.07); }
-.tdk-set-panel h2 { margin: 0; padding: 14px 16px; border-bottom: 1px solid #edf1f5; font-size: 16px; color: #1f2d3d; }
-.tdk-set-panel-body { padding: 14px 16px 16px; }
+.tdk-set-subtitle { margin: 0; color: #5c7182; font-size: 14px; }
+.tdk-set-layout { display: grid; grid-template-columns: minmax(300px, 390px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.tdk-set-panel { border: 1px solid #dfe5ea; border-radius: 10px; background: rgba(255,255,255,.96); box-shadow: 0 6px 22px rgba(31,45,61,.07); overflow: hidden; }
+.tdk-set-panel h2 { margin: 0; padding: 14px 16px; border-bottom: 1px solid #edf1f5; background: #fbfdff; font-size: 16px; color: #1f2d3d; }
+.tdk-set-panel-body { padding: 16px; }
 .tdk-set-field { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; margin-bottom: 12px; color: #4a5b6a; font-weight: 700; }
 .tdk-set-field input[type="number"] { width: 88px; height: 32px; border: 1px solid #d4dde5; border-radius: 6px; padding: 2px 8px; background: #fff; color: #1f2d3d; }
 .tdk-set-weight-grid { display: grid; gap: 8px; }
-.tdk-set-weight-item { display: grid; grid-template-columns: 1fr 62px; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid #edf1f5; border-radius: 6px; background: #fbfcfd; font-weight: 800; }
+.tdk-set-weight-item { display: grid; grid-template-columns: 1fr 62px; align-items: center; gap: 8px; padding: 9px 10px; border: 1px solid #edf1f5; border-radius: 6px; background: #fbfcfd; font-weight: 800; }
 .tdk-set-weight-item input { width: 62px; height: 30px; border: 1px solid #d4dde5; border-radius: 6px; padding: 2px 6px; text-align: center; }
 .tdk-set-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 .tdk-set-btn { height: 34px; padding: 0 14px; border: 1px solid #d4dde5; border-radius: 6px; background: #fff; color: #34495e; font-weight: 800; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
@@ -2740,14 +2739,11 @@
 .tdk-set-btn.primary { border-color: #3498db; background: #3498db; color: #fff; }
 .tdk-set-btn.primary:hover { background: #2485c7; color: #fff; }
 .tdk-set-btn:disabled { opacity: .55; cursor: not-allowed; box-shadow: none; }
-.tdk-set-result-empty { padding: 40px 16px; color: #8a98a8; text-align: center; }
+.tdk-set-result-empty { min-height: 240px; display: flex; align-items: center; justify-content: center; padding: 40px 16px; color: #8a98a8; text-align: center; border: 1px dashed #d4dde5; border-radius: 8px; background: #fbfcfd; }
 .tdk-set-summary { padding: 0 0 12px; color: #4a5b6a; line-height: 1.65; }
-.tdk-set-result textarea { width: 100%; min-height: 260px; resize: vertical; border: 1px solid #d4dde5; border-radius: 6px; padding: 10px; font-family: Consolas, monospace; font-size: 14px; line-height: 1.5; color: #1f2d3d; }
+.tdk-set-result textarea { width: 100%; min-height: 260px; resize: vertical; border: 1px solid #d4dde5; border-radius: 8px; padding: 12px; background: #fbfcfd; font-family: Consolas, monospace; font-size: 14px; line-height: 1.5; color: #1f2d3d; }
 .tdk-set-status { margin-top: 12px; padding: 9px 11px; border-radius: 6px; background: #f7f8fa; color: #667788; font-size: 13px; line-height: 1.5; word-break: break-word; }
 @media (max-width: 760px) {
-    #tdk-lg-nav { left: 8px; right: 8px; top: auto; bottom: 10px; justify-content: flex-start; overflow-x: auto; }
-    #tdk-lg-nav:not(:hover):not(:focus-within) .tdk-nav-btn { display: inline-block; }
-    .tdk-nav-btn { flex: 0 0 auto; }
     .tdk-set-layout { grid-template-columns: 1fr; }
     .tdk-set-head { display: block; }
 }
@@ -2760,7 +2756,6 @@
             if (document.getElementById('tdk-lg-box')) return;
 
             this.injectStyle();
-            this.createNav();
 
             if (isSetBuilderRoute()) {
                 this.renderSetBuilderPage();
@@ -2810,14 +2805,10 @@
 </div>
 <div id="tdk-lg-tabs">
     <button class="tdk-lg-tab" data-tab="random">随机题</button>
-    <button class="tdk-lg-tab" data-tab="color">染色</button>
-    <button class="tdk-lg-tab" data-tab="chart">统计</button>
-    <button class="tdk-lg-tab" data-tab="settings">设置</button>
+    <button class="tdk-lg-tab" data-tab="more">更多</button>
 </div>
 <div class="tdk-lg-panel" data-panel="random"></div>
-<div class="tdk-lg-panel" data-panel="color"></div>
-<div class="tdk-lg-panel" data-panel="chart"></div>
-<div class="tdk-lg-panel" data-panel="settings"></div>
+<div class="tdk-lg-panel" data-panel="more"></div>
 <div id="tdk-lg-status">准备就绪</div>
 <div id="tdk-lg-request"></div>
 <div id="tdk-lg-resize-hint">↘</div>
@@ -2838,67 +2829,9 @@
             if (this.getUIState().minimized === true) this.setMinimized(true);
         },
 
-        createNav() {
-            if (document.getElementById('tdk-lg-nav')) return;
-
-            const nav = document.createElement('div');
-            nav.id = 'tdk-lg-nav';
-            nav.innerHTML = `
-<span class="tdk-nav-brand">洛谷工具箱</span>
-<button class="tdk-nav-btn primary" data-action="nav-random">随机题</button>
-<button class="tdk-nav-btn" data-action="open-set-builder">组题</button>
-<button class="tdk-nav-btn" data-action="nav-color">染色</button>
-<button class="tdk-nav-btn" data-action="nav-chart">统计</button>
-<button class="tdk-nav-btn" data-action="nav-settings">设置</button>
-            `;
-
-            document.body.appendChild(nav);
-
-            nav.addEventListener('click', e => {
-                const action = e.target.closest('[data-action]')?.dataset.action;
-                if (!action) return;
-
-                if (action === 'open-set-builder') {
-                    location.href = buildSetBuilderUrl();
-                    return;
-                }
-
-                if (action === 'nav-settings') {
-                    location.href = buildSettingsUrl();
-                    return;
-                }
-
-                if (isSetBuilderRoute() || isSettingsRoute()) {
-                    const target = {
-                        'nav-random': 'random',
-                        'nav-color': 'color',
-                        'nav-chart': 'chart',
-                    }[action] || 'random';
-                    const url = new URL(BASE + '/');
-                    url.searchParams.set('tdk_tab', target);
-                    location.href = url.toString();
-                    return;
-                }
-
-                if (action === 'nav-random') this.openToolboxTab('random');
-                if (action === 'nav-color') this.openToolboxTab('color');
-                if (action === 'nav-chart') this.openToolboxTab('chart');
-            });
-        },
-
-        openToolboxTab(tab) {
-            const box = document.getElementById('tdk-lg-box');
-            if (!box) return;
-
-            this.setMinimized(false);
-            this.switchTab(tab);
-        },
-
         renderPanels() {
             this.renderRandomPanel();
-            this.renderColorPanel();
-            this.renderChartPanel();
-            this.refreshSettingsPanel();
+            this.renderMorePanel();
         },
 
         renderRandomPanel() {
@@ -2915,7 +2848,6 @@
 <div class="tdk-lg-actions">
     <button class="tdk-lg-btn main" data-action="random">随机一道题</button>
     <button class="tdk-lg-btn orange" data-action="refresh-pages">刷新难度池页数</button>
-    <button class="tdk-lg-btn" data-action="open-set-builder">打开组题页</button>
     <button class="tdk-lg-btn red" data-action="black-current">拉黑当前</button>
     <button class="tdk-lg-btn purple" data-action="toggle-blacklist">拉黑列表</button>
     <button class="tdk-lg-btn gray" data-action="clear-blacklist">清空拉黑</button>
@@ -3084,7 +3016,7 @@
     <div class="tdk-set-head">
         <div>
             <h1>按权重组题</h1>
-            <p class="tdk-set-subtitle">为题单或个人邀请赛生成题号列表，随机请求仍走全局限速。</p>
+            <p class="tdk-set-subtitle">生成逗号分隔题号列表，可直接粘贴到题单或个人邀请赛。</p>
         </div>
         <div class="tdk-set-actions">
             <button class="tdk-set-btn" data-action="nav-random">返回工具箱</button>
@@ -3114,7 +3046,7 @@
             </div>
         </section>
         <section class="tdk-set-panel">
-            <h2>生成结果</h2>
+            <h2>题号列表</h2>
             <div id="tdk-set-result" class="tdk-set-panel-body tdk-set-result"></div>
         </section>
     </div>
@@ -3310,13 +3242,19 @@
             textarea.remove();
         },
 
-        renderColorPanel() {
-            const panel = document.querySelector('[data-panel="color"]');
+        renderMorePanel() {
+            const panel = document.querySelector('[data-panel="more"]');
             if (!panel) return;
 
             const cacheCount = Object.keys(ProblemDifficulty.cache || {}).length;
+
             panel.innerHTML = `
-<p class="tdk-lg-desc">评测记录页直接读取页面数据；练习页和比赛页会分批查询缺失难度，全部请求受统一限速控制。</p>
+<p class="tdk-lg-desc">低频工具集中在这里；组题和设置会打开独立页面。</p>
+<div class="tdk-lg-tool-grid">
+    <button class="tdk-lg-tool-card" data-action="open-set-builder"><strong>组题页</strong><span>按权重生成题号列表</span></button>
+    <button class="tdk-lg-tool-card" data-action="open-settings-page"><strong>设置页</strong><span>模块、限速和参数</span></button>
+</div>
+<div class="tdk-lg-section-title">难度染色</div>
 <div class="tdk-lg-row">
     <span>难度缓存</span>
     <strong>${cacheCount} 条</strong>
@@ -3325,15 +3263,7 @@
     <button class="tdk-lg-btn main" data-action="rerender-color">刷新当前页染色</button>
     <button class="tdk-lg-btn gray" data-action="clear-diff-cache">清空难度缓存</button>
 </div>
-            `;
-        },
-
-        renderChartPanel() {
-            const panel = document.querySelector('[data-panel="chart"]');
-            if (!panel) return;
-
-            panel.innerHTML = `
-<p class="tdk-lg-desc">在首页、个人主页、练习页显示通过题目难度统计，并叠加最近通过题目的难度比例折线。</p>
+<div class="tdk-lg-section-title">统计图</div>
 <div class="tdk-lg-row">
     <label for="tdk-lg-chart-recent">最近通过题数</label>
     <input id="tdk-lg-chart-recent" type="number" min="${settings.chart.minRecentTotal}" max="${settings.chart.maxRecentTotal}" value="${settings.chart.recentTotal}" style="width:84px;height:28px;border:1px solid #ddd;border-radius:8px;padding:2px 6px;">
@@ -3590,7 +3520,7 @@
                 if (action === 'clear-diff-cache') {
                     if (!confirm('确定清空题目难度缓存吗？')) return;
                     ProblemDifficulty.clear();
-                    this.renderColorPanel();
+                    this.renderMorePanel();
                     this.setStatus('已清空题目难度缓存');
                 }
                 if (action === 'rerender-chart') {
@@ -3602,6 +3532,7 @@
                 if (action === 'copy-problem-set') this.copyProblemSet();
                 if (action === 'open-training-page') this.openLuoguPage(BASE + '/training/list', '已打开题单页，可新建题单并粘贴题号');
                 if (action === 'open-contest-page') this.openLuoguPage(BASE + '/contest/list', '已打开比赛页，可创建个人邀请赛并粘贴题号');
+                if (action === 'open-settings-page') location.href = buildSettingsUrl();
             });
 
             box.addEventListener('change', e => {
