@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         洛谷工具箱（随机题 / 难度染色 / 难度统计）
 // @namespace    https://github.com/thedyingkai/tampermonkey
-// @version      3.2.0
+// @version      3.2.1
 // @description  合并洛谷随机题、难度染色、练习难度统计；统一可扩展设置界面；全部 fetch 请求统一限制为最多 2 次/秒
 // @author       thedyingkai
 // @match        https://www.luogu.com.cn/*
@@ -222,6 +222,7 @@
         writeJSON(KEY.settings, settings);
 
         if (opts.refreshSettings) Toolbox.refreshSettingsPanel();
+        if (isSettingsRoute()) Toolbox.renderStandaloneSettingsList(document.getElementById('tdk-settings-list'));
         if (opts.random) Toolbox.syncRandomControls();
         else Toolbox.updateMiniPanel();
         Toolbox.applyModuleState();
@@ -335,9 +336,24 @@
         }
     }
 
+    function isSettingsRoute() {
+        try {
+            const url = new URL(location.href);
+            return url.searchParams.get('tdk_tool') === 'settings' || url.hash === '#tdk-settings';
+        } catch (_) {
+            return false;
+        }
+    }
+
     function buildSetBuilderUrl() {
         const url = new URL(BASE + '/');
         url.searchParams.set('tdk_tool', 'set_builder');
+        return url.toString();
+    }
+
+    function buildSettingsUrl() {
+        const url = new URL(BASE + '/');
+        url.searchParams.set('tdk_tool', 'settings');
         return url.toString();
     }
 
@@ -2637,9 +2653,10 @@
             const style = document.createElement('style');
             style.id = 'tdk-lg-toolbox-style';
             style.textContent = `
-#tdk-lg-nav { position: sticky; top: 0; z-index: 999998; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 7px 12px; border-bottom: 1px solid rgba(0,0,0,.08); background: rgba(255,255,255,.94); box-shadow: 0 2px 12px rgba(0,0,0,.06); backdrop-filter: blur(10px); font-family: "Microsoft YaHei", -apple-system, BlinkMacSystemFont, sans-serif; }
-#tdk-lg-nav .tdk-nav-brand { margin-right: 4px; color: #555; font-size: 13px; font-weight: 900; }
-.tdk-nav-btn { height: 30px; padding: 0 12px; border: 1px solid #dfe5ea; border-radius: 6px; background: #fff; color: #34495e; font-size: 13px; font-weight: 800; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,.04); transition: background .12s ease, border-color .12s ease, color .12s ease, box-shadow .12s ease; }
+#tdk-lg-nav { position: fixed; right: 14px; top: 44px; z-index: 999998; display: flex; align-items: center; gap: 5px; padding: 5px; border: 1px solid rgba(31,45,61,.12); border-radius: 8px; background: rgba(255,255,255,.92); box-shadow: 0 6px 20px rgba(31,45,61,.12); backdrop-filter: blur(10px); font-family: "Microsoft YaHei", -apple-system, BlinkMacSystemFont, sans-serif; }
+#tdk-lg-nav .tdk-nav-brand { display: inline-flex; align-items: center; height: 28px; padding: 0 10px; border-radius: 6px; background: #3498db; color: #fff; font-size: 12px; font-weight: 900; white-space: nowrap; }
+#tdk-lg-nav:not(:hover):not(:focus-within) .tdk-nav-btn { display: none; }
+.tdk-nav-btn { height: 28px; padding: 0 10px; border: 1px solid #dfe5ea; border-radius: 6px; background: #fff; color: #34495e; font-size: 12px; font-weight: 800; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,.04); transition: background .12s ease, border-color .12s ease, color .12s ease, box-shadow .12s ease; white-space: nowrap; }
 .tdk-nav-btn:hover { border-color: #3498db; color: #2485c7; box-shadow: 0 2px 8px rgba(52,152,219,.14); }
 .tdk-nav-btn.primary { border-color: #3498db; background: #3498db; color: #fff; }
 #tdk-lg-box { position: fixed; right: 20px; bottom: 20px; z-index: 999999; width: 380px; min-width: 300px; min-height: 260px; max-width: 760px; max-height: 86vh; background: rgba(255,255,255,.96); border: 1px solid rgba(0,0,0,.08); border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,.18); padding: 14px; font-family: "Microsoft YaHei", -apple-system, BlinkMacSystemFont, sans-serif; color: #222; overflow: auto; resize: both; font-size: var(--tdk-font-size, 14px); backdrop-filter: blur(10px); }
@@ -2702,8 +2719,8 @@
 #tdk-lg-box.tdk-minimized { width: auto!important; min-width: 0!important; min-height: 0!important; height: auto!important; resize: none!important; overflow: visible!important; padding: 8px 10px; border-radius: 999px; cursor: move; }
 #tdk-lg-box.tdk-minimized #tdk-lg-full-panel { display: none; }
 #tdk-lg-box.tdk-minimized #tdk-lg-mini-panel { display: flex; }
-#tdk-set-builder-page { min-height: calc(100vh - 46px); padding: 24px 18px 56px; background: #f4f7fa; font-family: "Microsoft YaHei", -apple-system, BlinkMacSystemFont, sans-serif; color: #1f2d3d; }
-#tdk-set-builder-page * { box-sizing: border-box; }
+#tdk-set-builder-page, #tdk-settings-page { min-height: 100vh; padding: 24px 18px 56px; background: #f4f7fa; font-family: "Microsoft YaHei", -apple-system, BlinkMacSystemFont, sans-serif; color: #1f2d3d; }
+#tdk-set-builder-page *, #tdk-settings-page * { box-sizing: border-box; }
 .tdk-set-shell { width: min(1120px, 100%); margin: 0 auto; }
 .tdk-set-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
 .tdk-set-head h1 { margin: 0 0 6px; font-size: 24px; line-height: 1.25; color: #1f2d3d; }
@@ -2728,8 +2745,8 @@
 .tdk-set-result textarea { width: 100%; min-height: 260px; resize: vertical; border: 1px solid #d4dde5; border-radius: 6px; padding: 10px; font-family: Consolas, monospace; font-size: 14px; line-height: 1.5; color: #1f2d3d; }
 .tdk-set-status { margin-top: 12px; padding: 9px 11px; border-radius: 6px; background: #f7f8fa; color: #667788; font-size: 13px; line-height: 1.5; word-break: break-word; }
 @media (max-width: 760px) {
-    #tdk-lg-nav { justify-content: flex-start; overflow-x: auto; }
-    #tdk-lg-nav .tdk-nav-brand { flex: 0 0 auto; }
+    #tdk-lg-nav { left: 8px; right: 8px; top: auto; bottom: 10px; justify-content: flex-start; overflow-x: auto; }
+    #tdk-lg-nav:not(:hover):not(:focus-within) .tdk-nav-btn { display: inline-block; }
     .tdk-nav-btn { flex: 0 0 auto; }
     .tdk-set-layout { grid-template-columns: 1fr; }
     .tdk-set-head { display: block; }
@@ -2747,6 +2764,11 @@
 
             if (isSetBuilderRoute()) {
                 this.renderSetBuilderPage();
+                return;
+            }
+
+            if (isSettingsRoute()) {
+                this.renderSettingsPage();
                 return;
             }
 
@@ -2830,11 +2852,7 @@
 <button class="tdk-nav-btn" data-action="nav-settings">设置</button>
             `;
 
-            const app = document.getElementById('app') || document.body.firstElementChild;
-            if (document.body) {
-                if (app && app.parentElement === document.body) app.before(nav);
-                else document.body.prepend(nav);
-            }
+            document.body.appendChild(nav);
 
             nav.addEventListener('click', e => {
                 const action = e.target.closest('[data-action]')?.dataset.action;
@@ -2845,12 +2863,16 @@
                     return;
                 }
 
-                if (isSetBuilderRoute()) {
+                if (action === 'nav-settings') {
+                    location.href = buildSettingsUrl();
+                    return;
+                }
+
+                if (isSetBuilderRoute() || isSettingsRoute()) {
                     const target = {
                         'nav-random': 'random',
                         'nav-color': 'color',
                         'nav-chart': 'chart',
-                        'nav-settings': 'settings',
                     }[action] || 'random';
                     const url = new URL(BASE + '/');
                     url.searchParams.set('tdk_tab', target);
@@ -2861,7 +2883,6 @@
                 if (action === 'nav-random') this.openToolboxTab('random');
                 if (action === 'nav-color') this.openToolboxTab('color');
                 if (action === 'nav-chart') this.openToolboxTab('chart');
-                if (action === 'nav-settings') this.openToolboxTab('settings');
             });
         },
 
@@ -2971,6 +2992,7 @@
         applyModuleState() {
             const box = document.getElementById('tdk-lg-box');
             const setPage = document.getElementById('tdk-set-builder-page');
+            const settingsPage = document.getElementById('tdk-settings-page');
 
             const toggle = (root, selector, enabled) => {
                 if (!root) return;
@@ -2983,6 +3005,7 @@
             toggle(box, '[data-action="rerender-color"], [data-action="clear-diff-cache"]', settings.modules.color);
             toggle(box, '[data-action="rerender-chart"], #tdk-lg-chart-recent', settings.modules.chart);
             toggle(setPage, '[data-action="build-problem-set"], [data-action="copy-problem-set"], [data-action="refresh-pages"], [data-action="open-training-page"], [data-action="open-contest-page"], #tdk-set-total, #tdk-set-allow-ac, #tdk-set-weight-grid input', settings.modules.random);
+            toggle(settingsPage, '[data-action="open-set-builder"]', settings.modules.random);
 
             if (!box) {
                 if (!settings.modules.chart) ChartModule.removeOld();
@@ -3031,20 +3054,30 @@
             });
         },
 
-        renderSetBuilderPage() {
-            document.title = '组题 - 洛谷工具箱';
+        enterStandalonePage(title, id) {
+            document.title = title;
             document.getElementById('tdk-lg-box')?.remove();
             ChartModule.removeOld();
             document.querySelectorAll('#app, #app-old').forEach(node => {
                 node.style.display = 'none';
             });
 
-            let page = document.getElementById('tdk-set-builder-page');
+            for (const pageId of ['tdk-set-builder-page', 'tdk-settings-page']) {
+                if (pageId !== id) document.getElementById(pageId)?.remove();
+            }
+
+            let page = document.getElementById(id);
             if (!page) {
                 page = document.createElement('main');
-                page.id = 'tdk-set-builder-page';
+                page.id = id;
                 document.body.appendChild(page);
             }
+
+            return page;
+        },
+
+        renderSetBuilderPage() {
+            const page = this.enterStandalonePage('组题 - 洛谷工具箱', 'tdk-set-builder-page');
 
             page.innerHTML = `
 <div class="tdk-set-shell">
@@ -3143,9 +3176,87 @@
             this.applyModuleState();
         },
 
+        renderSettingsPage() {
+            const page = this.enterStandalonePage('设置 - 洛谷工具箱', 'tdk-settings-page');
+
+            page.innerHTML = `
+<div class="tdk-set-shell">
+    <div class="tdk-set-head">
+        <div>
+            <h1>工具箱设置</h1>
+            <p class="tdk-set-subtitle">模块开关、请求限制、随机题、染色和统计图参数都在这里统一调整。</p>
+        </div>
+        <div class="tdk-set-actions">
+            <button class="tdk-set-btn" data-action="nav-random">返回工具箱</button>
+            <button class="tdk-set-btn" data-action="open-set-builder">组题页</button>
+        </div>
+    </div>
+    <div class="tdk-set-layout">
+        <section class="tdk-set-panel">
+            <h2>设置项</h2>
+            <div id="tdk-settings-list" class="tdk-set-panel-body"></div>
+        </section>
+        <section class="tdk-set-panel">
+            <h2>状态</h2>
+            <div class="tdk-set-panel-body">
+                <div id="tdk-settings-status" class="tdk-set-status">设置会自动保存到本地浏览器。</div>
+            </div>
+        </section>
+    </div>
+</div>
+            `;
+
+            this.renderStandaloneSettingsList(page.querySelector('#tdk-settings-list'));
+
+            page.onchange = e => {
+                const input = e.target.closest('[data-path]');
+                if (!input || !page.contains(input)) return;
+                this.handleSettingChange(input);
+                this.renderStandaloneSettingsList(page.querySelector('#tdk-settings-list'));
+                const status = document.getElementById('tdk-settings-status');
+                if (status) status.innerText = '设置已保存';
+            };
+
+            page.onclick = e => {
+                const action = e.target.closest('[data-action]')?.dataset.action;
+                if (!action) return;
+
+                if (action === 'nav-random') location.href = BASE + '/';
+                if (action === 'open-set-builder') location.href = buildSetBuilderUrl();
+            };
+
+            this.applyModuleState();
+        },
+
+        renderStandaloneSettingsList(root) {
+            if (!root) return;
+            root.innerHTML = '';
+
+            for (const section of SETTING_SCHEMA) {
+                const box = document.createElement('div');
+                box.className = 'tdk-setting-section';
+
+                const title = document.createElement('h4');
+                title.textContent = section.title;
+                box.appendChild(title);
+
+                for (const item of section.items) {
+                    const row = this.createSettingItem(item);
+                    box.appendChild(row);
+                }
+
+                root.appendChild(box);
+            }
+
+            const help = document.createElement('div');
+            help.className = 'tdk-setting-help';
+            help.textContent = '设置变更会即时生效；请求必须使用 RequestQueue.fetch/text/json/doc，才能保证全局不超过 2 次/秒。';
+            root.appendChild(help);
+        },
+
         formatProblemSetText(data = this.lastProblemSet) {
             if (!data || !Array.isArray(data.problems)) return '';
-            return data.problems.map(item => item.pid).join('\n');
+            return data.problems.map(item => item.pid).join(',');
         },
 
         renderProblemSetResult() {
@@ -3272,45 +3383,7 @@
                 box.appendChild(title);
 
                 for (const item of section.items) {
-                    const row = document.createElement('div');
-                    row.className = 'tdk-setting-item';
-
-                    const label = document.createElement('label');
-                    label.textContent = item.label;
-                    row.appendChild(label);
-
-                    let input;
-
-                    if (item.type === 'boolean') {
-                        input = document.createElement('input');
-                        input.type = 'checkbox';
-                        input.className = 'tdk-lg-switch';
-                        input.checked = !!getByPath(settings, item.path);
-                    } else if (item.type === 'select') {
-                        input = document.createElement('select');
-                        for (const opt of item.options || []) {
-                            const option = document.createElement('option');
-                            option.value = opt.value;
-                            option.textContent = opt.label;
-                            input.appendChild(option);
-                        }
-                        input.value = String(getByPath(settings, item.path));
-                    } else {
-                        input = document.createElement('input');
-                        input.type = 'number';
-                        if (item.min !== undefined) input.min = item.min;
-                        if (item.max !== undefined) input.max = item.max;
-                        if (item.step !== undefined) input.step = item.step;
-                        input.value = getByPath(settings, item.path);
-                    }
-
-                    input.dataset.path = item.path;
-                    input.dataset.type = item.type;
-                    if (item.min !== undefined) input.dataset.min = String(item.min);
-                    if (item.max !== undefined) input.dataset.max = String(item.max);
-
-                    row.appendChild(input);
-                    box.appendChild(row);
+                    box.appendChild(this.createSettingItem(item));
                 }
 
                 panel.appendChild(box);
@@ -3320,6 +3393,48 @@
             help.className = 'tdk-setting-help';
             help.textContent = '扩展方式：在脚本顶部 SETTING_SCHEMA 里添加配置项，并在 DEFAULT_SETTINGS 里给默认值；请求必须使用 RequestQueue.fetch/text/json/doc，才能保证全局不超过 2 次/秒。';
             panel.appendChild(help);
+        },
+
+        createSettingItem(item) {
+            const row = document.createElement('div');
+            row.className = 'tdk-setting-item';
+
+            const label = document.createElement('label');
+            label.textContent = item.label;
+            row.appendChild(label);
+
+            let input;
+
+            if (item.type === 'boolean') {
+                input = document.createElement('input');
+                input.type = 'checkbox';
+                input.className = 'tdk-lg-switch';
+                input.checked = !!getByPath(settings, item.path);
+            } else if (item.type === 'select') {
+                input = document.createElement('select');
+                for (const opt of item.options || []) {
+                    const option = document.createElement('option');
+                    option.value = opt.value;
+                    option.textContent = opt.label;
+                    input.appendChild(option);
+                }
+                input.value = String(getByPath(settings, item.path));
+            } else {
+                input = document.createElement('input');
+                input.type = 'number';
+                if (item.min !== undefined) input.min = item.min;
+                if (item.max !== undefined) input.max = item.max;
+                if (item.step !== undefined) input.step = item.step;
+                input.value = getByPath(settings, item.path);
+            }
+
+            input.dataset.path = item.path;
+            input.dataset.type = item.type;
+            if (item.min !== undefined) input.dataset.min = String(item.min);
+            if (item.max !== undefined) input.dataset.max = String(item.max);
+
+            row.appendChild(input);
+            return row;
         },
 
         handleSettingChange(input) {
@@ -3673,6 +3788,9 @@
 
             const pageNode = document.getElementById('tdk-set-status');
             if (pageNode) pageNode.innerText = msg;
+
+            const settingsNode = document.getElementById('tdk-settings-status');
+            if (settingsNode) settingsNode.innerText = msg;
         },
 
         updateRequestBadge() {
@@ -3705,8 +3823,13 @@
                     return;
                 }
 
-                const page = document.getElementById('tdk-set-builder-page');
-                if (page) page.remove();
+                if (isSettingsRoute()) {
+                    Toolbox.renderSettingsPage();
+                    return;
+                }
+
+                document.getElementById('tdk-set-builder-page')?.remove();
+                document.getElementById('tdk-settings-page')?.remove();
                 document.querySelectorAll('#app, #app-old').forEach(node => {
                     node.style.display = '';
                 });
