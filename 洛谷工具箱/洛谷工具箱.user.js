@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         洛谷工具箱（随机题 / 难度染色 / 难度统计）
 // @namespace    https://github.com/thedyingkai/tampermonkey
-// @version      3.3.0
+// @version      3.3.1
 // @description  合并洛谷随机题、难度染色、练习难度统计；统一可扩展设置界面；全部 fetch 请求统一限制为最多 2 次/秒
 // @author       thedyingkai
 // @match        https://www.luogu.com.cn/*
@@ -24,26 +24,82 @@
         { id: 0, name: '暂无评定', color: 'rgb(191, 191, 191)' },
         { id: 1, name: '入门', color: 'rgb(254, 76, 97)' },
         { id: 2, name: '普及−', color: 'rgb(243, 156, 17)' },
-        { id: 3, name: '普及/提高−', color: 'rgb(255, 193, 22)' },
-        { id: 4, name: '普及+/提高', color: 'rgb(82, 196, 26)' },
-        { id: 5, name: '提高+/省选−', color: 'rgb(52, 152, 219)' },
-        { id: 6, name: '省选/NOI−', color: 'rgb(157, 61, 207)' },
-        { id: 7, name: 'NOI/NOI+/CTSC', color: 'rgb(14, 29, 105)' },
+        { id: 3, name: '普及', color: 'rgb(255, 193, 22)', aliases: ['普及/提高−'] },
+        { id: 4, name: '普及+/提高−', color: 'rgb(83, 196, 26)', aliases: ['普及+/提高'] },
+        { id: 5, name: '提高', color: 'rgb(19, 194, 194)' },
+        { id: 6, name: '提高+/省选−', color: 'rgb(52, 152, 219)' },
+        { id: 7, name: '省选/NOI−', color: 'rgb(156, 61, 207)' },
+        { id: 8, name: 'NOI/NOI+/CTS', color: 'rgb(14, 29, 105)', aliases: ['NOI/NOI+/CTSC'] },
     ];
 
     const COLOR = DIFFICULTIES.map(x => x.color);
+    const DIFFICULTY_SCHEMA_VERSION = 2;
+    const LEGACY_DIFF_TO_CURRENT = {
+        0: 0,
+        1: 1,
+        2: 2,
+        3: 3,
+        4: 4,
+        5: 6,
+        6: 7,
+        7: 8,
+    };
 
     const KEY = {
         settings: 'tdk_luogu_toolbox_settings_v3',
         ui: 'tdk_luogu_toolbox_ui_v3',
-        diffCache: 'tdk_luogu_problem_difficulty_cache_v8',
+        diffCache: 'tdk_luogu_problem_difficulty_cache_v9',
         blockUntil: 'tdk_luogu_problem_difficulty_block_until_v16',
-        randomPageCache: 'luogu_rand_page_cache_v1.3',
+        randomPageCache: 'luogu_rand_page_cache_v1.4',
         randomBlacklist: 'luogu_rand_blacklist_v1.3',
         chartMemoryRecentTotal: 'tdk_luogu_recent_total',
         oldRandomDiff: 'luogu_rand_diff_v1.3',
         oldAllowAC: 'luogu_rand_allow_ac_v1.3',
     };
+
+    function coerceDifficultyId(diff, fallback = 0, allowUnrated = true) {
+        const id = Number(diff);
+        const min = allowUnrated ? 0 : 1;
+        return Number.isInteger(id) && id >= min && id < COLOR.length ? id : fallback;
+    }
+
+    function migrateLegacyDifficultyId(diff, fallback = 3, allowUnrated = false) {
+        const legacy = Number(diff);
+        if (!Number.isInteger(legacy)) return fallback;
+        const current = Object.prototype.hasOwnProperty.call(LEGACY_DIFF_TO_CURRENT, legacy)
+            ? LEGACY_DIFF_TO_CURRENT[legacy]
+            : legacy;
+        return coerceDifficultyId(current, fallback, allowUnrated);
+    }
+
+    function migrateLegacyDifficultyPool(pool) {
+        return Array.from(new Set((Array.isArray(pool) ? pool : [])
+            .map(x => migrateLegacyDifficultyId(x, null, false))
+            .filter(x => x !== null)
+            .map(String)));
+    }
+
+    function migrateLegacyDifficultyWeights(weights) {
+        const migrated = {};
+        if (!weights || typeof weights !== 'object' || Array.isArray(weights)) return migrated;
+
+        for (const [diff, weight] of Object.entries(weights)) {
+            const current = migrateLegacyDifficultyId(diff, null, false);
+            if (current === null) continue;
+            migrated[current] = weight;
+        }
+
+        return migrated;
+    }
+
+    function defaultRandomDifficulty() {
+        return String(migrateLegacyDifficultyId(localStorage.getItem(KEY.oldRandomDiff) || '3', 3, false));
+    }
+
+    function getDifficultyMetaByName(name) {
+        const text = String(name || '').trim();
+        return DIFFICULTIES.find(item => item.name === text || (item.aliases || []).includes(text));
+    }
 
     const DEFAULT_SETTINGS = {
         modules: {
@@ -56,7 +112,8 @@
             cooldownMs: 10000,
         },
         random: {
-            difficulty: localStorage.getItem(KEY.oldRandomDiff) || '3',
+            difficultyVersion: DIFFICULTY_SCHEMA_VERSION,
+            difficulty: defaultRandomDifficulty(),
             difficultyPool: ['3'],
             allowAC: localStorage.getItem(KEY.oldAllowAC) === '1',
             cacheTtlDays: 7,
@@ -70,8 +127,9 @@
                 3: 3,
                 4: 2,
                 5: 1,
-                6: 0,
+                6: 1,
                 7: 0,
+                8: 0,
             },
         },
         color: {
@@ -150,8 +208,7 @@
     }
 
     function validDiff(diff) {
-        diff = Number(diff);
-        return Number.isInteger(diff) && diff >= 0 && diff < COLOR.length;
+        return coerceDifficultyId(diff, null, true) !== null;
     }
 
     function escapeHtml(s) {
@@ -252,6 +309,8 @@
         const source = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
         const sourceRandom = source.random && typeof source.random === 'object' && !Array.isArray(source.random) ? source.random : null;
         const hasDifficultyPool = !!sourceRandom && Object.prototype.hasOwnProperty.call(sourceRandom, 'difficultyPool');
+        const hasSetWeights = !!sourceRandom && Object.prototype.hasOwnProperty.call(sourceRandom, 'setWeights');
+        const shouldMigrateDifficulty = !!sourceRandom && sourceRandom.difficultyVersion !== DIFFICULTY_SCHEMA_VERSION;
         const next = deepMerge(DEFAULT_SETTINGS, source);
 
         next.modules = next.modules && typeof next.modules === 'object' && !Array.isArray(next.modules) ? next.modules : structuredCloneSafe(DEFAULT_SETTINGS.modules);
@@ -267,6 +326,19 @@
         next.request.maxPerSecond = clamp(next.request.maxPerSecond, 0.2, 2);
         next.request.cooldownMs = Math.floor(clamp(next.request.cooldownMs, 1000, 60000));
 
+        if (shouldMigrateDifficulty) {
+            if (Object.prototype.hasOwnProperty.call(sourceRandom, 'difficulty')) {
+                next.random.difficulty = String(migrateLegacyDifficultyId(sourceRandom.difficulty, 3, false));
+            }
+            if (hasDifficultyPool) {
+                next.random.difficultyPool = migrateLegacyDifficultyPool(sourceRandom.difficultyPool);
+            }
+            if (hasSetWeights) {
+                next.random.setWeights = migrateLegacyDifficultyWeights(sourceRandom.setWeights);
+            }
+        }
+
+        next.random.difficultyVersion = DIFFICULTY_SCHEMA_VERSION;
         next.random.difficulty = validDiff(next.random.difficulty) && Number(next.random.difficulty) > 0 ? String(Number(next.random.difficulty)) : '3';
         next.random.difficultyPool = hasDifficultyPool && Array.isArray(next.random.difficultyPool)
             ? Array.from(new Set(next.random.difficultyPool.map(x => String(Number(x))).filter(x => validDiff(x) && Number(x) > 0)))
@@ -2015,7 +2087,7 @@
                 const m = cnt.textContent.trim().match(/\d+/);
                 if (!name || !m) return null;
 
-                const meta = DIFFICULTIES.find(x => x.name === name);
+                const meta = getDifficultyMetaByName(name);
 
                 return {
                     id: meta?.id ?? 0,
@@ -2041,9 +2113,7 @@
 
         getDifficultyId(x) {
             if (x === null || x === undefined) return 0;
-            x = Number(x);
-            if (!Number.isFinite(x) || x < 0 || x > 7) return 0;
-            return x;
+            return coerceDifficultyId(x, 0, true);
         },
 
         getProblemPid(problem) {
@@ -2201,7 +2271,7 @@
             if (x === null || x === undefined) return null;
 
             const id = Number(x);
-            if (!Number.isFinite(id) || id < 0 || id > 7) return null;
+            if (!validDiff(id)) return null;
             return id;
         },
 
